@@ -5,7 +5,6 @@ import osmnx as ox
 import pandas as pd
 import requests
 import warnings
-import difflib
 
 # --- CLOUD DEPLOYMENT OPTIMIZATION ---
 ox.settings.requests_kwargs = {"headers": {"User-Agent": "EV-National-Grid-Command/1.0"}}
@@ -36,10 +35,54 @@ api_key = st.secrets["NREL_API_KEY"]
 # ---------------------------------
 
 st.sidebar.header("🎯 Target Analysis Region")
-target_region = st.sidebar.text_input(
-    "Enter US County or City (e.g., Denver, Colorado)", 
-    value="Denver, Colorado"
-)
+
+# Structured State & Region Selectors (Bypasses blocking geocoders entirely)
+states_dict = {
+    "Pennsylvania": {
+        "Allegheny County (Pittsburgh Metro)": (40.712, 40.219, -79.692, -80.353),
+        "Beaver County": (40.850, 40.480, -80.100, -80.580),
+        "Philadelphia County": (40.137, 39.867, -74.955, -75.280),
+    },
+    "Washington": {
+        "King County (Seattle Metro)": (47.778, 47.100, -121.100, -122.540),
+        "Yakima County": (46.750, 46.100, -119.800, -121.400),
+        "Pierce County": (47.350, 46.850, -121.500, -122.900),
+    },
+    "Colorado": {
+        "Denver County (Denver Metro)": (39.914, 39.614, -104.600, -105.150),
+        "El Paso County (Colorado Springs)": (39.100, 38.700, -104.200, -105.100),
+        "Boulder County": (40.250, 39.880, -105.050, -105.600),
+    },
+    "California": {
+        "Los Angeles County": (34.823, 32.832, -117.646, -118.945),
+        "San Diego County": (33.500, 32.500, -116.000, -117.600),
+        "San Francisco County": (37.833, 37.708, -122.356, -122.515),
+    },
+    "Texas": {
+        "Harris County (Houston Metro)": (30.150, 29.500, -94.950, -95.950),
+        "Travis County (Austin Metro)": (30.516, 30.108, -97.374, -98.083),
+        "Dallas County": (33.023, 32.618, -96.536, -97.040),
+    },
+    "Arizona": {
+        "Maricopa County (Phoenix Metro)": (33.950, 32.500, -111.000, -113.350),
+        "Pima County (Tucson)": (32.500, 31.330, -110.400, -113.300),
+    },
+    "Illinois": {
+        "Cook County (Chicago Metro)": (42.152, 41.464, -87.524, -88.264),
+    },
+    "Georgia": {
+        "Fulton County (Atlanta Metro)": (34.120, 33.590, -84.180, -84.580),
+    },
+    "Nevada": {
+        "Clark County (Las Vegas Metro)": (37.000, 35.000, -114.000, -115.900),
+    }
+}
+
+selected_state = st.sidebar.selectbox("Select State", list(states_dict.keys()))
+selected_region_name = st.sidebar.selectbox("Select Region / County", list(states_dict[selected_state].keys()))
+
+target_region = f"{selected_region_name}, {selected_state}"
+bbox = states_dict[selected_state][selected_region_name]
 
 st.sidebar.markdown("---")
 st.sidebar.header("🕹️ Visual Engine Modes")
@@ -72,81 +115,30 @@ show_arcs = st.sidebar.checkbox("Render Kinetic Deficit Arcs", value=True)
 camera_pitch = st.sidebar.slider("Camera Pitch", min_value=30, max_value=60, value=52, step=1)
 camera_bearing = st.sidebar.slider("Camera Rotation", min_value=-180, max_value=180, value=-22, step=2)
 
-# High-Speed U.S. Bounding Box Database (Bypasses slow/blocking live geocoders)
-REGION_BBOXES = {
-    "allegheny county, pennsylvania": (40.712, 40.219, -79.692, -80.353),
-    "king county, washington": (47.778, 47.100, -121.100, -122.540),
-    "seattle, washington": (47.734, 47.495, -122.224, -122.436),
-    "cook county, illinois": (42.152, 41.464, -87.524, -88.264),
-    "chicago, illinois": (42.023, 41.644, -87.524, -87.940),
-    "los angeles county, california": (34.823, 32.832, -117.646, -118.945),
-    "los angeles, california": (34.337, 33.703, -118.155, -118.668),
-    "harris county, texas": (30.150, 29.500, -94.950, -95.950),
-    "houston, texas": (30.110, 29.523, -95.059, -95.790),
-    "maricopa county, arizona": (33.950, 32.500, -111.000, -113.350),
-    "phoenix, arizona": (33.854, 33.290, -111.921, -112.325),
-    "denver county, colorado": (39.914, 39.614, -104.600, -105.150),
-    "denver, colorado": (39.914, 39.614, -104.600, -105.150),
-    "fulton county, georgia": (34.120, 33.590, -84.180, -84.580),
-    "atlanta, georgia": (33.888, 33.705, -84.289, -84.551),
-    "clark county, nevada": (37.000, 35.000, -114.000, -115.900),
-    "las vegas, nevada": (36.330, 36.080, -115.060, -115.360),
-    "san diego county, california": (33.500, 32.500, -116.000, -117.600),
-    "san diego, california": (33.000, 32.534, -116.909, -117.310),
-    "dallas county, texas": (33.023, 32.618, -96.536, -97.040),
-    "dallas, texas": (33.023, 32.618, -96.536, -97.040),
-    "travis county, texas": (30.516, 30.108, -97.374, -98.083),
-    "austin, texas": (30.516, 30.108, -97.374, -98.083),
-    "multnomah county, oregon": (45.655, 45.430, -122.400, -123.000),
-    "portland, oregon": (45.655, 45.430, -122.400, -123.000),
-    "new york county, ny": (40.882, 40.684, -73.910, -74.042),
-    "new york, new york": (40.917, 40.477, -73.700, -74.259),
-    "philadelphia county, pennsylvania": (40.137, 39.867, -74.955, -75.280),
-    "philadelphia, pennsylvania": (40.137, 39.867, -74.955, -75.280),
-    "wayne county, michigan": (42.450, 42.050, -83.000, -83.600),
-    "detroit, michigan": (42.450, 42.250, -82.910, -83.287),
-    "marion county, indiana": (39.928, 39.632, -85.935, -86.353),
-    "indianapolis, indiana": (39.928, 39.632, -85.935, -86.353),
-    "mecklenburg county, north carolina": (35.400, 35.000, -80.500, -81.000),
-    "charlotte, north carolina": (35.400, 35.000, -80.500, -81.000),
-    "hennepin county, minnesota": (45.240, 44.790, -93.180, -93.750),
-    "minneapolis, minnesota": (45.051, 44.890, -93.200, -93.330),
-    "san francisco county, california": (37.833, 37.708, -122.356, -122.515),
-    "san francisco, california": (37.833, 37.708, -122.356, -122.515)
-}
-
 @st.cache_data
-def load_live_data(region_query, nrel_key):
-    clean_query = region_query.strip().lower()
-    
-    # Smart Fuzzy Matching to protect against typos and partial names
-    if clean_query in REGION_BBOXES:
-        north, south, east, west = REGION_BBOXES[clean_query]
-    else:
-        matches = difflib.get_close_matches(clean_query, REGION_BBOXES.keys(), n=1, cutoff=0.25)
-        if matches:
-            best_match = matches[0]
-            north, south, east, west = REGION_BBOXES[best_match]
-            st.sidebar.info(f"💡 Matched '{region_query}' to **{best_match.title()}**.")
-        else:
-            # Fallback box if completely unmatched
-            north, south, east, west = (40.712, 40.219, -79.692, -80.353)
-            st.sidebar.warning(f"⚠️ Region '{region_query}' not recognized. Falling back to Allegheny County, PA.")
-
+def load_live_data(north, south, east, west, state_name, nrel_key):
     tags = {"amenity": "fuel"}
     try:
+        # Queries OpenStreetMap using direct coordinate bounds (Zero geocoding failure)
         gas_stations_gdf = ox.features_from_bbox(north, south, east, west, tags=tags)
         if gas_stations_gdf.empty:
             raise ValueError("No gas stations found.")
         gas_stations_gdf = gas_stations_gdf[gas_stations_gdf.geometry.type == "Point"].copy()
         gas_stations_gdf = gas_stations_gdf.to_crs(epsg=4326)
     except Exception:
-        st.warning(f"No candidate conversion sites found in {region_query}.")
         return pd.DataFrame(), pd.DataFrame()
+    
+    # Map full state names to 2-letter postal codes for NREL API filtering
+    state_codes = {
+        "Pennsylvania": "PA", "Washington": "WA", "Colorado": "CO", 
+        "California": "CA", "Texas": "TX", "Arizona": "AZ", 
+        "Illinois": "IL", "Georgia": "GA", "Nevada": "NV"
+    }
+    state_code = state_codes.get(state_name, "PA")
     
     nlr_url = (
         "https://developer.nlr.gov/api/alt-fuel-stations/v1.json?"
-        f"api_key={nrel_key}&fuel_type=ELEC&ev_charging_level=dc_fast&country=US"
+        f"api_key={nrel_key}&fuel_type=ELEC&state={state_code}&ev_charging_level=dc_fast"
     )
     
     local_chargers_gdf = gpd.GeoDataFrame()
@@ -164,6 +156,7 @@ def load_live_data(region_query, nrel_key):
                     geometry=gpd.points_from_xy(nlr_df.longitude, nlr_df.latitude),
                     crs="EPSG:4326"
                 )
+                # Clip NREL stations precisely to the selected region's bounding box
                 local_chargers_gdf = nlr_gdf[
                     (nlr_gdf.geometry.y >= south) & (nlr_gdf.geometry.y <= north) &
                     (nlr_gdf.geometry.x >= west) & (nlr_gdf.geometry.x <= east)
@@ -245,7 +238,8 @@ def load_live_data(region_query, nrel_key):
     return pd.DataFrame(gas_final.drop(columns=['geometry'])), chargers_df_out
 
 with st.spinner(f"Compiling 3D spatial network for {target_region}..."):
-    candidate_df, chargers_df = load_live_data(target_region, api_key)
+    north, south, east, west = bbox
+    candidate_df, chargers_df = load_live_data(north, south, east, west, selected_state, api_key)
 
 if j40_filter and not candidate_df.empty:
     candidate_df = candidate_df[candidate_df["is_j40_dac"] == True]
@@ -254,7 +248,7 @@ is_stress_mode = "Thermal" in visual_mode
 
 if not candidate_df.empty:
     if is_stress_mode:
-        st.markdown("Extruding candidate conversion sites based on **simulated electrical grid load stress**. Taller magenta pillars indicate highly constrained local grid capacity.")
+        st.markdown(f"Extruding candidate conversion sites in **{target_region}** based on **simulated electrical grid load stress**. Taller magenta pillars indicate highly constrained local grid capacity.")
         candidate_df["elevation"] = candidate_df["stress_score"] * 30
         
         def evaluate_thermal(row):
@@ -274,7 +268,7 @@ if not candidate_df.empty:
         metric_val = len(candidate_df[candidate_df["stress_score"] > 85])
         
     else:
-        st.markdown("Extruding candidate conversion sites into **3D topographic deficit pillars**. Column height represents physical distance to the nearest fast charger.")
+        st.markdown(f"Extruding candidate conversion sites in **{target_region}** into **3D topographic deficit pillars**. Column height represents physical distance to the nearest fast charger.")
         candidate_df["elevation"] = candidate_df["dist_miles"] * 200
         
         def evaluate_distance(row):
