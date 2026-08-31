@@ -5,6 +5,7 @@ import osmnx as ox
 import pandas as pd
 import requests
 import warnings
+import difflib
 
 # --- CLOUD DEPLOYMENT FIX ---
 ox.settings.requests_kwargs = {"headers": {"User-Agent": "EV-National-Grid-Command/1.0"}}
@@ -26,16 +27,47 @@ st.markdown("""
 
 st.title("⚡ National EV Grid & Kinetic Reach Simulator")
 
-# --- SECURE API KEY VALIDATION (No hardcoded keys in script) ---
+# --- SECURE API KEY VALIDATION ---
 if "NREL_API_KEY" not in st.secrets:
-    st.error("🛑 **API Key Missing:** Please add your `NREL_API_KEY` to the Streamlit Cloud Advanced Settings Secrets box or your local `.streamlit/secrets.toml` file.")
+    st.error("🛑 **API Key Missing:** Please add your `NREL_API_KEY` to the Streamlit Cloud Advanced Settings Secrets box.")
     st.stop()
 
 api_key = st.secrets["NREL_API_KEY"]
-# -------------------------------------------------------------
+# ---------------------------------
 
 st.sidebar.header("🎯 Target Analysis Region")
-target_region = st.sidebar.text_input("Enter City or County", "King County, Washington")
+
+# Curated list of major U.S. EV markets / counties for instant type-to-search filtering
+popular_regions = [
+    "Allegheny County, Pennsylvania",
+    "King County, Washington",
+    "Cook County, Illinois",
+    "Los Angeles County, California",
+    "Harris County, Texas",
+    "Maricopa County, Arizona",
+    "Beaver County, Pennsylvania",
+    "Fulton County, Georgia",
+    "Middlesex County, Massachusetts",
+    "Clark County, Nevada",
+    "San Diego County, California",
+    "Miami-Dade County, Florida",
+    "Denver County, Colorado",
+    "Multnomah County, Oregon",
+    "Travis County, Texas",
+    "Custom Region..."
+]
+
+# st.selectbox natively filters and populates options as you type!
+selected_region_option = st.sidebar.selectbox(
+    "Search or Select Region (Type to Filter)", 
+    popular_regions,
+    index=1  # Default to King County, WA
+)
+
+if selected_region_option == "Custom Region...":
+    target_region = st.sidebar.text_input("Type Custom County/City (e.g., Dane County, Wisconsin)", "Dane County, Wisconsin")
+else:
+    target_region = selected_region_option
 
 st.sidebar.markdown("---")
 st.sidebar.header("🕹️ Visual Engine Modes")
@@ -73,7 +105,8 @@ def load_live_data(region_query, nrel_key):
     try:
         region_boundary = ox.geocode_to_gdf(region_query)
     except Exception:
-        st.error(f"🛑 **Geocoding Error:** Could not resolve boundaries for '{region_query}'. Try formatting as 'County, State' or 'City, State'.")
+        # Fallback helper if a custom typo is entered
+        st.error(f"🛑 **Geocoding Error:** Could not resolve boundaries for '{region_query}'. Please check your spelling or format as 'County, State'.")
         st.stop()
         
     tags = {"amenity": "fuel"}
