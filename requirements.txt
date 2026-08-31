@@ -1,9 +1,8 @@
+streamlit
 streamlit-folium
 folium
 pydeck
-geopandas
-shapely
 pandas
+shapely
 requests
-numpy
-osmnx
+psycopg2-binary
