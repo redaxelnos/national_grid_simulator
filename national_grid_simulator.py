@@ -5,6 +5,7 @@ import osmnx as ox
 import pandas as pd
 import requests
 import warnings
+import difflib
 
 # --- CLOUD DEPLOYMENT OPTIMIZATION ---
 ox.settings.requests_kwargs = {"headers": {"User-Agent": "EV-National-Grid-Command/1.0"}}
@@ -35,10 +36,9 @@ api_key = st.secrets["NREL_API_KEY"]
 # ---------------------------------
 
 st.sidebar.header("🎯 Target Analysis Region")
-# Fully flexible text input so you aren't restricted by a rigid dropdown
 target_region = st.sidebar.text_input(
-    "Enter County & State (e.g., Allegheny County, Pennsylvania)", 
-    value="Allegheny County, Pennsylvania"
+    "Enter US County or City (e.g., Denver, Colorado)", 
+    value="Denver, Colorado"
 )
 
 st.sidebar.markdown("---")
@@ -72,37 +72,69 @@ show_arcs = st.sidebar.checkbox("Render Kinetic Deficit Arcs", value=True)
 camera_pitch = st.sidebar.slider("Camera Pitch", min_value=30, max_value=60, value=52, step=1)
 camera_bearing = st.sidebar.slider("Camera Rotation", min_value=-180, max_value=180, value=-22, step=2)
 
-# High-Speed Bounding Box Dictionary (Bypasses slow/blocking geocoders entirely)
+# High-Speed U.S. Bounding Box Database (Bypasses slow/blocking live geocoders)
 REGION_BBOXES = {
     "allegheny county, pennsylvania": (40.712, 40.219, -79.692, -80.353),
     "king county, washington": (47.778, 47.100, -121.100, -122.540),
+    "seattle, washington": (47.734, 47.495, -122.224, -122.436),
     "cook county, illinois": (42.152, 41.464, -87.524, -88.264),
+    "chicago, illinois": (42.023, 41.644, -87.524, -87.940),
     "los angeles county, california": (34.823, 32.832, -117.646, -118.945),
+    "los angeles, california": (34.337, 33.703, -118.155, -118.668),
     "harris county, texas": (30.150, 29.500, -94.950, -95.950),
+    "houston, texas": (30.110, 29.523, -95.059, -95.790),
     "maricopa county, arizona": (33.950, 32.500, -111.000, -113.350),
-    "beaver county, pennsylvania": (40.850, 40.480, -80.100, -80.580),
-    "fulton county, georgia": (34.120, 33.590, -84.180, -84.580),
-    "clark county, nevada": (37.000, 35.000, -114.000, -115.900),
-    "san diego county, california": (33.500, 32.500, -116.000, -117.600),
+    "phoenix, arizona": (33.854, 33.290, -111.921, -112.325),
     "denver county, colorado": (39.914, 39.614, -104.600, -105.150),
-    "multnomah county, oregon": (45.655, 45.430, -122.400, -123.000)
+    "denver, colorado": (39.914, 39.614, -104.600, -105.150),
+    "fulton county, georgia": (34.120, 33.590, -84.180, -84.580),
+    "atlanta, georgia": (33.888, 33.705, -84.289, -84.551),
+    "clark county, nevada": (37.000, 35.000, -114.000, -115.900),
+    "las vegas, nevada": (36.330, 36.080, -115.060, -115.360),
+    "san diego county, california": (33.500, 32.500, -116.000, -117.600),
+    "san diego, california": (33.000, 32.534, -116.909, -117.310),
+    "dallas county, texas": (33.023, 32.618, -96.536, -97.040),
+    "dallas, texas": (33.023, 32.618, -96.536, -97.040),
+    "travis county, texas": (30.516, 30.108, -97.374, -98.083),
+    "austin, texas": (30.516, 30.108, -97.374, -98.083),
+    "multnomah county, oregon": (45.655, 45.430, -122.400, -123.000),
+    "portland, oregon": (45.655, 45.430, -122.400, -123.000),
+    "new york county, ny": (40.882, 40.684, -73.910, -74.042),
+    "new york, new york": (40.917, 40.477, -73.700, -74.259),
+    "philadelphia county, pennsylvania": (40.137, 39.867, -74.955, -75.280),
+    "philadelphia, pennsylvania": (40.137, 39.867, -74.955, -75.280),
+    "wayne county, michigan": (42.450, 42.050, -83.000, -83.600),
+    "detroit, michigan": (42.450, 42.250, -82.910, -83.287),
+    "marion county, indiana": (39.928, 39.632, -85.935, -86.353),
+    "indianapolis, indiana": (39.928, 39.632, -85.935, -86.353),
+    "mecklenburg county, north carolina": (35.400, 35.000, -80.500, -81.000),
+    "charlotte, north carolina": (35.400, 35.000, -80.500, -81.000),
+    "hennepin county, minnesota": (45.240, 44.790, -93.180, -93.750),
+    "minneapolis, minnesota": (45.051, 44.890, -93.200, -93.330),
+    "san francisco county, california": (37.833, 37.708, -122.356, -122.515),
+    "san francisco, california": (37.833, 37.708, -122.356, -122.515)
 }
 
 @st.cache_data
 def load_live_data(region_query, nrel_key):
     clean_query = region_query.strip().lower()
     
-    # Match against high-speed bounding boxes, default to Allegheny County if custom/unlisted
+    # Smart Fuzzy Matching to protect against typos and partial names
     if clean_query in REGION_BBOXES:
         north, south, east, west = REGION_BBOXES[clean_query]
     else:
-        # Graceful fallback bounding box for custom queries
-        north, south, east, west = (40.712, 40.219, -79.692, -80.353)
-        st.sidebar.info(f"ℹ️ Custom region detected. Rendering default geographic bounds; results will dynamically map local NREL and OSM infrastructure.")
+        matches = difflib.get_close_matches(clean_query, REGION_BBOXES.keys(), n=1, cutoff=0.25)
+        if matches:
+            best_match = matches[0]
+            north, south, east, west = REGION_BBOXES[best_match]
+            st.sidebar.info(f"💡 Matched '{region_query}' to **{best_match.title()}**.")
+        else:
+            # Fallback box if completely unmatched
+            north, south, east, west = (40.712, 40.219, -79.692, -80.353)
+            st.sidebar.warning(f"⚠️ Region '{region_query}' not recognized. Falling back to Allegheny County, PA.")
 
     tags = {"amenity": "fuel"}
     try:
-        # Queries Overpass API directly using coordinates (Zero Nominatim geocoding lag or blocks)
         gas_stations_gdf = ox.features_from_bbox(north, south, east, west, tags=tags)
         if gas_stations_gdf.empty:
             raise ValueError("No gas stations found.")
@@ -132,7 +164,6 @@ def load_live_data(region_query, nrel_key):
                     geometry=gpd.points_from_xy(nlr_df.longitude, nlr_df.latitude),
                     crs="EPSG:4326"
                 )
-                # Filter NREL stations strictly within our bounding box coordinates
                 local_chargers_gdf = nlr_gdf[
                     (nlr_gdf.geometry.y >= south) & (nlr_gdf.geometry.y <= north) &
                     (nlr_gdf.geometry.x >= west) & (nlr_gdf.geometry.x <= east)
