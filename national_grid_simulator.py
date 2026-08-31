@@ -7,7 +7,7 @@ import requests
 import warnings
 
 # --- CLOUD DEPLOYMENT OPTIMIZATION ---
-ox.settings.requests_kwargs = {"headers": {"User-Agent": "EV-National-Grid-Command/2.0"}}
+ox.settings.requests_kwargs = {"headers": {"User-Agent": "EV-National-Grid-Command/3.0"}}
 ox.settings.requests_timeout = 60
 # -------------------------------------
 
@@ -36,43 +36,100 @@ api_key = st.secrets["NREL_API_KEY"]
 
 st.sidebar.header("🎯 Nationwide Region Selector")
 
-@st.cache_data
-def load_us_locations():
-    # Load a comprehensive public database of U.S. cities and towns with coordinates
-    url = "https://raw.githubusercontent.com/plotly/datasets/master/uscities.csv"
-    df = pd.read_csv(url)
-    df["label"] = df["city"] + ", " + df["state_id"]
-    return df
+# Comprehensive Nationwide State, County, and Major Metro Database covering all 50 States
+nationwide_regions = {
+    "Alabama": {"Jefferson County (Birmingham)": (33.750, 33.300, -86.600, -87.050), "Mobile County": (31.100, 30.200, -88.000, -88.500)},
+    "Alaska": {"Anchorage Municipality": (61.600, 60.750, -148.800, -150.400)},
+    "Arizona": {"Maricopa County (Phoenix)": (33.950, 32.500, -111.000, -113.350), "Pima County (Tucson)": (32.500, 31.330, -110.400, -113.300)},
+    "Arkansas": {"Pulaski County (Little Rock)": (35.000, 34.500, -92.000, -92.600)},
+    "California": {
+        "Los Angeles County": (34.823, 32.832, -117.646, -118.945),
+        "San Diego County": (33.500, 32.500, -116.000, -117.600),
+        "San Francisco County": (37.833, 37.708, -122.356, -122.515),
+        "Santa Clara County (Silicon Valley)": (37.450, 37.000, -121.500, -122.250),
+        "Sacramento County": (38.750, 38.250, -121.000, -121.650)
+    },
+    "Colorado": {
+        "Denver County (Denver Metro)": (39.914, 39.614, -104.600, -105.150),
+        "El Paso County (Colorado Springs)": (39.100, 38.700, -104.200, -105.100),
+        "Boulder County": (40.250, 39.880, -105.050, -105.600)
+    },
+    "Connecticut": {"Fairfield County": (41.450, 41.000, -73.050, -73.750), "Hartford County": (42.000, 41.600, -72.400, -73.000)},
+    "Delaware": {"New Castle County": (39.850, 39.300, -75.400, -75.800)},
+    "Florida": {
+        "Miami-Dade County": (25.980, 25.150, -80.100, -80.850),
+        "Orange County (Orlando)": (28.700, 28.250, -81.100, -81.600),
+        "Hillsborough County (Tampa)": (28.250, 27.700, -82.150, -82.650)
+    },
+    "Georgia": {"Fulton County (Atlanta Metro)": (34.120, 33.590, -84.180, -84.580), "Chatham County (Savannah)": (32.200, 31.750, -80.800, -81.300)},
+    "Hawaii": {"Honolulu County": (21.750, 21.250, -157.650, -158.300)},
+    "Idaho": {"Ada County (Boise)": (43.750, 43.300, -116.000, -116.650)},
+    "Illinois": {"Cook County (Chicago Metro)": (42.152, 41.464, -87.524, -88.264), "DuPage County": (42.000, 41.680, -87.950, -88.300)},
+    "Indiana": {"Marion County (Indianapolis)": (39.928, 39.632, -85.935, -86.353)},
+    "Iowa": {"Polk County (Des Moines)": (41.800, 41.450, -93.350, -93.900)},
+    "Kansas": {"Johnson County": (39.000, 38.750, -94.600, -95.000)},
+    "Kentucky": {"Jefferson County (Louisville)": (38.350, 38.000, -85.400, -85.900)},
+    "Louisiana": {"Orleans Parish (New Orleans)": (30.100, 29.850, -89.850, -90.200)},
+    "Maine": {"Cumberland County (Portland)": (44.000, 43.500, -69.900, -70.600)},
+    "Maryland": {"Montgomery County": (39.300, 38.950, -76.900, -77.550), "Baltimore City": (39.380, 39.200, -76.500, -76.750)},
+    "Massachusetts": {"Middlesex County (Boston Area)": (42.650, 42.200, -71.050, -71.650), "Suffolk County (Boston)": (42.400, 42.200, -70.950, -71.180)},
+    "Michigan": {"Wayne County (Detroit Metro)": (42.450, 42.050, -83.000, -83.600), "Kent County (Grand Rapids)": (43.200, 42.750, -85.450, -85.900)},
+    "Minnesota": {"Hennepin County (Minneapolis)": (45.240, 44.790, -93.180, -93.750)},
+    "Mississippi": {"Hinds County (Jackson)": (32.450, 32.150, -90.000, -90.500)},
+    "Missouri": {"St. Louis County": (38.800, 38.450, -90.200, -90.750), "Jackson County (Kansas City)": (39.150, 38.750, -93.950, -94.580)},
+    "Montana": {"Gallatin County (Bozeman)": (46.000, 45.300, -110.500, -111.600)},
+    "Nebraska": {"Douglas County (Omaha)": (41.400, 41.150, -95.850, -96.300)},
+    "Nevada": {"Clark County (Las Vegas Metro)": (37.000, 35.000, -114.000, -115.900), "Washoe County (Reno)": (40.000, 39.300, -119.350, -120.100)},
+    "New Hampshire": {"Hillsborough County": (43.100, 42.700, -71.300, -71.950)},
+    "New Jersey": {"Bergen County": (41.050, 40.780, -73.900, -74.300), "Essex County (Newark)": (40.850, 40.680, -74.100, -74.350)},
+    "New Mexico": {"Bernalillo County (Albuquerque)": (35.250, 34.850, -106.350, -106.850)},
+    "New York": {
+        "New York County (Manhattan)": (40.882, 40.684, -73.910, -74.042),
+        "Kings County (Brooklyn)": (40.740, 40.570, -73.850, -74.050),
+        "Queens County": (40.800, 40.550, -73.700, -73.960),
+        "Erie County (Buffalo)": (43.050, 42.700, -78.550, -79.000)
+    },
+    "North Carolina": {"Mecklenburg County (Charlotte)": (35.400, 35.000, -80.500, -81.000), "Wake County (Raleigh)": (36.050, 35.550, -78.350, -78.950)},
+    "North Dakota": {"Cass County (Fargo)": (47.100, 46.650, -96.650, -97.350)},
+    "Ohio": {"Cuyahoga County (Cleveland)": (41.580, 41.330, -81.380, -81.950), "Franklin County (Columbus)": (40.150, 39.800, -82.750, -83.200)},
+    "Oklahoma": {"Oklahoma County (Oklahoma City)": (35.700, 35.300, -97.200, -97.750)},
+    "Oregon": {"Multnomah County (Portland Metro)": (45.655, 45.430, -122.400, -123.000), "Deschutes County (Bend)": (44.450, 43.700, -121.000, -121.800)},
+    "Pennsylvania": {
+        "Allegheny County (Pittsburgh Metro)": (40.712, 40.219, -79.692, -80.353),
+        "Beaver County": (40.850, 40.480, -80.100, -80.580),
+        "Philadelphia County": (40.137, 39.867, -74.955, -75.280),
+        "Montgomery County": (40.450, 40.050, -75.050, -75.600)
+    },
+    "Rhode Island": {"Providence County": (42.000, 41.750, -71.250, -71.700)},
+    "South Carolina": {"Greenville County": (35.150, 34.650, -82.100, -82.600), "Charleston County": (33.000, 32.400, -79.700, -80.350)},
+    "South Dakota": {"Minnehaha County (Sioux Falls)": (43.750, 43.450, -96.500, -97.000)},
+    "Tennessee": {"Shelby County (Memphis)": (35.300, 35.000, -89.650, -90.150), "Davidson County (Nashville)": (36.400, 36.000, -86.550, -87.050)},
+    "Texas": {
+        "Harris County (Houston Metro)": (30.150, 29.500, -94.950, -95.950),
+        "Travis County (Austin Metro)": (30.516, 30.108, -97.374, -98.083),
+        "Dallas County": (33.023, 32.618, -96.536, -97.040),
+        "Bexar County (San Antonio)": (29.650, 29.150, -98.250, -98.850),
+        "Tarrant County (Fort Worth)": (33.000, 32.550, -97.050, -97.550)
+    },
+    "Utah": {"Salt Lake County (Salt Lake City)": (40.850, 40.350, -111.550, -112.250)},
+    "Vermont": {"Chittenden County (Burlington)": (44.600, 44.300, -72.900, -73.300)},
+    "Virginia": {"Fairfax County": (39.000, 38.700, -77.050, -77.550), "Loudoun County": (39.200, 38.850, -77.350, -77.950)},
+    "Washington": {
+        "King County (Seattle Metro)": (47.778, 47.100, -121.100, -122.540),
+        "Yakima County": (46.750, 46.100, -119.800, -121.400),
+        "Pierce County": (47.350, 46.850, -121.500, -122.900),
+        "Spokane County": (47.950, 47.300, -117.000, -117.800)
+    },
+    "West Virginia": {"Kanawha County (Charleston)": (38.500, 38.100, -81.300, -81.900)},
+    "Wisconsin": {"Milwaukee County": (43.180, 42.850, -87.880, -88.100), "Dane County (Madison)": (43.300, 42.950, -89.150, -89.700)},
+    "Wyoming": {"Laramie County (Cheyenne)": (41.500, 41.000, -104.500, -105.200)}
+}
 
-with st.spinner("Loading nationwide U.S. geographic database..."):
-    cities_df = load_us_locations()
+selected_state = st.sidebar.selectbox("Select State", list(nationwide_regions.keys()))
+selected_region_name = st.sidebar.selectbox("Select County / Metro Area", list(nationwide_regions[selected_state].keys()))
 
-# Type-to-search selectbox containing tens of thousands of U.S. cities and towns
-city_options = cities_df["label"].tolist()
-# Default to Pittsburgh, PA if available, otherwise first option
-default_idx = city_options.index("Pittsburgh, PA") if "Pittsburgh, PA" in city_options else 0
-
-selected_city_label = st.sidebar.selectbox(
-    "Search Any U.S. City or Town", 
-    city_options,
-    index=default_idx,
-    help="Type any city name to instantly zoom and analyze its grid infrastructure."
-)
-
-# Extract selected city details
-match = cities_df[cities_df["label"] == selected_city_label].iloc[0]
-target_city = match["city"]
-target_state = match["state_id"]
-lat = match["lat"]
-lng = match["lng"]
-
-# Dynamically generate a bounding box (~20 miles square) around any selected U.S. city coordinates
-lat_delta = 0.15
-lng_delta = 0.15
-north = lat + lat_delta
-south = lat - lat_delta
-east = lng + lng_delta
-west = lng - lng_delta
+target_region = f"{selected_region_name}, {selected_state}"
+north, south, east, west = nationwide_regions[selected_state][selected_region_name]
 
 st.sidebar.markdown("---")
 st.sidebar.header("🕹️ Visual Engine Modes")
@@ -88,8 +145,8 @@ j40_filter = st.sidebar.checkbox("Isolate Justice40 DAC Sites", value=False)
 
 with st.sidebar.expander("🧠 Methodology & Critical Context", expanded=False):
     st.markdown("""
-    **Nationwide Coordinate-Radius Engine**
-    By leveraging open geographic coordinate datasets paired with direct coordinate bounding boxes (`ox.features_from_bbox`), this tool bypasses slow and restrictive geocoding servers. You can analyze any city or town in the United States instantly.
+    **Nationwide Hierarchical Selection Engine**
+    By structuring searches across all 50 U.S. states and their primary economic counties and metropolitan regions, this tool avoids blocking third-party geocoders while providing instant access to every major market in the country.
 
     **The Visual Metaphor: Pillars vs. Glowing Pads**
     *   **Neon Green Glowing Pads:** Existing active DC Fast Charging hubs.
@@ -103,7 +160,7 @@ camera_pitch = st.sidebar.slider("Camera Pitch", min_value=30, max_value=60, val
 camera_bearing = st.sidebar.slider("Camera Rotation", min_value=-180, max_value=180, value=-22, step=2)
 
 @st.cache_data
-def load_live_data(w, s, e, n, state_code, nrel_key):
+def load_live_data(w, s, e, n, state_name, nrel_key):
     tags = {"amenity": "fuel"}
     try:
         bbox_tuple = (w, s, e, n)
@@ -114,6 +171,21 @@ def load_live_data(w, s, e, n, state_code, nrel_key):
         gas_stations_gdf = gas_stations_gdf.to_crs(epsg=4326)
     except Exception:
         return pd.DataFrame(), pd.DataFrame()
+    
+    # Map state names to 2-letter postal codes for NREL API
+    state_codes = {
+        "Alabama": "AL", "Alaska": "AK", "Arizona": "AZ", "Arkansas": "AR", "California": "CA",
+        "Colorado": "CO", "Connecticut": "CT", "Delaware": "DE", "Florida": "FL", "Georgia": "GA",
+        "Hawaii": "HI", "Idaho": "ID", "Illinois": "IL", "Indiana": "IN", "Iowa": "IA",
+        "Kansas": "KS", "Kentucky": "KY", "Louisiana": "LA", "Maine": "ME", "Maryland": "MD",
+        "Massachusetts": "MA", "Michigan": "MI", "Minnesota": "MN", "Mississippi": "MS", "Missouri": "MO",
+        "Montana": "MT", "Nebraska": "NE", "Nevada": "NV", "New Hampshire": "NH", "New Jersey": "NJ",
+        "New Mexico": "NM", "New York": "NY", "North Carolina": "NC", "North Dakota": "ND", "Ohio": "OH",
+        "Oklahoma": "OK", "Oregon": "OR", "Pennsylvania": "PA", "Rhode Island": "RI", "South Carolina": "SC",
+        "South Dakota": "SD", "Tennessee": "TN", "Texas": "TX", "Utah": "UT", "Vermont": "VT",
+        "Virginia": "VA", "Washington": "WA", "West Virginia": "WV", "Wisconsin": "WI", "Wyoming": "WY"
+    }
+    state_code = state_codes.get(state_name, "PA")
     
     nlr_url = (
         "https://developer.nlr.gov/api/alt-fuel-stations/v1.json?"
@@ -216,8 +288,11 @@ def load_live_data(w, s, e, n, state_code, nrel_key):
         
     return pd.DataFrame(gas_final.drop(columns=['geometry'])), chargers_df_out
 
-with st.spinner(f"Compiling 3D spatial network for {target_city}, {target_state}..."):
-    candidate_df, chargers_df = load_live_data(west, south, east, north, target_state, api_key)
+# Extract west, south, east, north from selected county bbox
+west, south, east, north = nationwide_regions[selected_state][selected_region_name]
+
+with st.spinner(f"Compiling 3D spatial network for {target_region}..."):
+    candidate_df, chargers_df = load_live_data(west, south, east, north, selected_state, api_key)
 
 if j40_filter and not candidate_df.empty:
     candidate_df = candidate_df[candidate_df["is_j40_dac"] == True]
@@ -226,7 +301,7 @@ is_stress_mode = "Thermal" in visual_mode
 
 if not candidate_df.empty:
     if is_stress_mode:
-        st.markdown(f"Extruding candidate conversion sites in **{target_city}, {target_state}** based on **simulated electrical grid load stress**. Taller magenta pillars indicate highly constrained local grid capacity.")
+        st.markdown(f"Extruding candidate conversion sites in **{target_region}** based on **simulated electrical grid load stress**. Taller magenta pillars indicate highly constrained local grid capacity.")
         candidate_df["elevation"] = candidate_df["stress_score"] * 30
         
         def evaluate_thermal(row):
@@ -246,7 +321,7 @@ if not candidate_df.empty:
         metric_val = len(candidate_df[candidate_df["stress_score"] > 85])
         
     else:
-        st.markdown(f"Extruding candidate conversion sites in **{target_city}, {target_state}** into **3D topographic deficit pillars**. Column height represents physical distance to the nearest fast charger.")
+        st.markdown(f"Extruding candidate conversion sites in **{target_region}** into **3D topographic deficit pillars**. Column height represents physical distance to the nearest fast charger.")
         candidate_df["elevation"] = candidate_df["dist_miles"] * 200
         
         def evaluate_distance(row):
@@ -332,10 +407,14 @@ if not chargers_df.empty:
     )
     layers.extend([layer_hub_halo, layer_hub_core])
 
+# Dynamically center the camera based on the selected region's bounding box center
+center_lat = (north + south) / 2
+center_lng = (east + west) / 2
+
 view_state = pdk.ViewState(
-    latitude=lat,
-    longitude=lng,
-    zoom=10.5,
+    latitude=center_lat,
+    longitude=center_lng,
+    zoom=10.0,
     pitch=camera_pitch,
     bearing=camera_bearing
 )
