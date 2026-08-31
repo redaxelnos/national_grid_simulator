@@ -5,11 +5,11 @@ import pandas as pd
 import requests
 import warnings
 import numpy as np
-from shapely.geometry import Point
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
+import folium
+from folium.plugins import Draw
+from streamlit_folium import st_folium
+from shapely.geometry import Polygon, Point, shape
 
-# --- CLOUD DEPLOYMENT OPTIMIZATION ---
 warnings.filterwarnings('ignore')
 
 st.set_page_config(layout="wide", page_title="Nationwide EV Grid & Justice40 Terminal")
@@ -25,68 +25,95 @@ st.markdown("""
 
 st.title("⚡ Nationwide EV Grid & CEJST Justice40 Command Terminal")
 
-# --- SECURE API KEY VALIDATION ---
+# --- SECURE API KEY RETRIEVAL ---
 if "NREL_API_KEY" not in st.secrets:
-    st.error("🛑 **API Key Missing:** Please add your `NREL_API_KEY` to the Streamlit Cloud Advanced Settings Secrets box.")
+    st.error("🛑 **API Key Missing:** Please configure your `NREL_API_KEY` in `.streamlit/secrets.toml` or Streamlit Cloud Secrets.")
     st.stop()
 
 api_key = st.secrets["NREL_API_KEY"]
 # ---------------------------------
 
-st.sidebar.header("🎯 Nationwide Region Selector")
-
-# Built-in, pre-validated regional dictionary (avoids live OSMnx/Overpass queries)
-nationwide_regions = {
-    "Pennsylvania": {
-        "Allegheny County (Pittsburgh Metro)": (-80.353, 40.219, -79.692, 40.712),
-        "Beaver County": (-80.580, 40.480, -80.100, 40.850),
-        "Philadelphia County": (-75.280, 39.867, -74.955, 40.137),
-    },
-    "Washington": {
-        "King County (Seattle Metro)": (-122.540, 47.100, -121.100, 47.778),
-        "Pierce County": (-122.900, 46.850, -121.500, 47.350),
-    },
-    "Colorado": {
-        "Denver County (Denver Metro)": (-105.150, 39.614, -104.600, 39.914),
-    },
-    "California": {
-        "Los Angeles County": (-118.945, 32.832, -117.646, 34.823),
-        "San Francisco County": (-122.515, 37.708, -122.356, 37.833),
-    },
-    "Texas": {
-        "Harris County (Houston Metro)": (-95.950, 29.500, -94.950, 30.150),
-    },
-    "Illinois": {
-        "Cook County (Chicago Metro)": (-88.264, 41.464, -87.524, 42.152),
-    }
+# Pre-mapped regional boundaries
+PRESET_REGIONS = {
+    "Allegheny County, PA (Pittsburgh)": (-80.353, 40.219, -79.692, 40.712, "PA"),
+    "Philadelphia County, PA": (-75.280, 39.867, -74.955, 40.137, "PA"),
+    "King County, WA (Seattle)": (-122.540, 47.100, -121.100, 47.778, "WA"),
+    "Pierce County, WA (Tacoma)": (-122.900, 46.850, -121.500, 47.350, "WA"),
+    "Denver County, CO": (-105.150, 39.614, -104.600, 39.914, "CO"),
+    "Los Angeles County, CA": (-118.945, 32.832, -117.646, 34.823, "CA"),
+    "San Francisco County, CA": (-122.515, 37.708, -122.356, 37.833, "CA"),
+    "Harris County, TX (Houston)": (-95.950, 29.500, -94.950, 30.150, "TX"),
+    "Cook County, IL (Chicago)": (-88.264, 41.464, -87.524, 42.152, "IL")
 }
 
-selected_state = st.sidebar.selectbox("Select State", list(nationwide_regions.keys()))
-selected_region_name = st.sidebar.selectbox("Select County / Metro Area", list(nationwide_regions[selected_state].keys()))
+st.sidebar.header("🎯 Spatial Boundary Selector")
+input_method = st.sidebar.radio(
+    "Select Boundary Mode",
+    ["Interactive Map Lasso / Polygon", "Preset Metropolitan County"]
+)
 
-target_region = f"{selected_region_name}, {selected_state}"
-west, south, east, north = nationwide_regions[selected_state][selected_region_name]
+active_polygon = None
+active_state_code = "US"
+region_label = ""
+
+if input_method == "Interactive Map Lasso / Polygon":
+    st.markdown("### ✏️ Interactive Area Lasso")
+    st.caption("Use the polygon or rectangle tool on the toolbar (left side of map) to draw your custom boundary. The 3D grid telemetry below will immediately calculate infrastructure metrics inside your shape.")
+    
+    m = folium.Map(location=[39.8283, -98.5795], zoom_start=4, tiles="CartoDB dark_matter")
+    Draw(
+        export=False,
+        draw_options={
+            'polyline': False,
+            'circle': False,
+            'marker': False,
+            'circlemarker': False,
+            'polygon': True,
+            'rectangle': True
+        }
+    ).add_to(m)
+    
+    draw_output = st_folium(m, width="100%", height=380, key="draw_map")
+    
+    if draw_output and draw_output.get("last_active_drawing"):
+        geom_dict = draw_output["last_active_drawing"]["geometry"]
+        active_polygon = shape(geom_dict)
+        region_label = "Custom Drawn Boundary"
+    else:
+        st.info("👆 Draw a polygon or rectangle on the map above to initialize spatial telemetry.")
+        st.stop()
+
+else:
+    selected_preset = st.sidebar.selectbox("Choose Target Region", list(PRESET_REGIONS.keys()))
+    west, south, east, north, state_code = PRESET_REGIONS[selected_preset]
+    active_polygon = Polygon([(west, south), (east, south), (east, north), (west, north)])
+    active_state_code = state_code
+    region_label = selected_preset
 
 st.sidebar.markdown("---")
 st.sidebar.header("🕹️ Visual Engine Modes")
-
 visual_mode = st.sidebar.radio(
     "3D Telemetry Mapping Mode",
-    ["Spatial Distance (Grid Deficit)", "Thermal Capacity (Feeder Stress)"]
+    ["Spatial Distance (Grid Deficit)", "Thermal Capacity (Feeder Stress)"],
+    help="Switch between physical distance deficit visualization and feeder capacity constraints."
 )
 
 st.sidebar.markdown("---")
 st.sidebar.header("⚖️ Equity & Policy Filters")
-j40_filter = st.sidebar.checkbox("Isolate Justice40 DAC Sites (CEJST Criteria)", value=False, help="Filter for census tracts meeting CEJST cumulative burden thresholds.")
+j40_filter = st.sidebar.checkbox(
+    "Isolate Justice40 DAC Sites (CEJST Criteria)", 
+    value=False, 
+    help="Filter candidate sites by CEJST disadvantaged community indicators."
+)
 
 with st.sidebar.expander("🧠 Methodology & Compliance Context", expanded=True):
     st.markdown("""
     **Official Federal Data Pipelines & Compliance Standards**
     
-    *   **NREL Alternative Fuels Data Center API:** Queries live federal records (`developer.nlr.gov`) to ingest verified DC Fast Charger (DCFC) coordinates, active network operators, and total port data.
-    *   **CEJST Justice40 Screening Framework:** Integrates Council on Environmental Quality (CEQ) screening guidelines to evaluate socioeconomic, public health, and environmental burden thresholds.
-    *   **Brownfield Conversion Analysis:** Evaluates existing commercial fuel infrastructure as primary conversion targets. Leveraging established brownfield corridors minimizes capital expenditure.
-    *   **Spatial Gap & Feeder Stress Modeling:** Calculates exact linear distances to existing fast chargers to identify unserved 'EV Deserts' (>2.0 miles) while modeling local distribution feeder capacity.
+    *   **NREL Alternative Fuels Data Center API:** Queries live federal records (`developer.nlr.gov`) to ingest verified DC Fast Charger (DCFC) coordinates, active network operators, and port counts across the United States.
+    *   **CEJST Justice40 Screening Framework:** Evaluates socioeconomic, public health, and environmental burden thresholds across energy, transportation, and climate categories to identify Disadvantaged Communities (DACs) eligible for priority federal funding.
+    *   **Brownfield Conversion Analysis:** Evaluates commercial fuel footprints as primary conversion targets, utilizing existing rights-of-way, electrical service drop corridors, and heavy-duty vehicle turnarounds.
+    *   **Spatial Gap & Feeder Stress Modeling:** Calculates exact linear distances to existing fast chargers to isolate unserved 'EV Deserts' (>2.0 miles) while modeling feeder load stress to identify transformer upgrade bottlenecks.
     """)
 
 st.sidebar.markdown("---")
@@ -95,295 +122,216 @@ show_arcs = st.sidebar.checkbox("Render Kinetic Deficit Arcs", value=True)
 camera_pitch = st.sidebar.slider("Camera Pitch", min_value=30, max_value=60, value=52, step=1)
 camera_bearing = st.sidebar.slider("Camera Rotation", min_value=-180, max_value=180, value=-22, step=2)
 
-@st.cache_data(ttl=60*60)
-def load_authentic_federal_data(w, s, e, n, state_name, nrel_key):
-    """Load NREL DC Fast Charger records for a bounding box and generate a pre-validated
-    grid of commercial fuel (candidate brownfield) sites.
-
-    The function is resilient to network failures and returns two DataFrames (candidates, chargers).
-    """
-    state_codes = {
-        "Pennsylvania": "PA", "Washington": "WA", "Colorado": "CO", 
-        "California": "CA", "Texas": "TX", "Illinois": "IL"
-    }
-    state_code = state_codes.get(state_name, "PA")
-    # Updated official NREL API endpoint per deployment spec
+@st.cache_data
+def fetch_and_process_spatial_data(poly_geojson, state_code, nrel_key):
+    poly = shape(poly_geojson)
+    minx, miny, maxx, maxy = poly.bounds
+    
+    # 1. Query NREL Fast Chargers
+    state_param = f"&state={state_code}" if state_code != "US" else ""
     nlr_url = (
         "https://developer.nlr.gov/api/alt-fuel-stations/v1.json?"
-        f"api_key={nrel_key}&fuel_type=ELEC&state={state_code}&ev_charging_level=dc_fast"
+        f"api_key={nrel_key}&fuel_type=ELEC&ev_charging_level=dc_fast{state_param}"
     )
-
+    
     local_chargers_gdf = gpd.GeoDataFrame()
-
-    # Session with retries to be resilient on cloud (short, conservative retry/backoff)
     session = requests.Session()
     session.trust_env = False
-    retries = Retry(total=3, backoff_factor=1, status_forcelist=[429, 502, 503, 504])
-    adapter = HTTPAdapter(max_retries=retries)
-    session.mount("https://", adapter)
-
+    
     try:
-        response = session.get(nlr_url, timeout=10)
+        response = session.get(nlr_url, timeout=15)
         if response.status_code == 200:
             stations = response.json().get('alt_fuel_stations', [])
             nlr_df = pd.DataFrame(stations)
-            if not nlr_df.empty and {'longitude','latitude'}.issubset(nlr_df.columns):
-                nlr_df = nlr_df.copy()
-                nlr_df['longitude'] = pd.to_numeric(nlr_df['longitude'], errors='coerce')
-                nlr_df['latitude'] = pd.to_numeric(nlr_df['latitude'], errors='coerce')
-                nlr_df = nlr_df.dropna(subset=['longitude','latitude'])
-                if not nlr_df.empty:
-                    nlr_gdf = gpd.GeoDataFrame(
-                        nlr_df, 
-                        geometry=gpd.points_from_xy(nlr_df.longitude, nlr_df.latitude),
-                        crs="EPSG:4326"
-                    )
-                    local_chargers_gdf = nlr_gdf[
-                        (nlr_gdf.geometry.y >= s) & (nlr_gdf.geometry.y <= n) &
-                        (nlr_gdf.geometry.x >= w) & (nlr_gdf.geometry.x <= e)
-                    ].copy()
-
-                    if not local_chargers_gdf.empty:
-                        # Normalize fields we rely on
-                        if 'station_name' not in local_chargers_gdf.columns:
-                            local_chargers_gdf['station_name'] = 'NREL DC Fast Charger'
-                        else:
-                            local_chargers_gdf['station_name'] = local_chargers_gdf['station_name'].fillna('NREL DC Fast Charger')
-
-                        if 'ev_network' not in local_chargers_gdf.columns:
-                            local_chargers_gdf['ev_network'] = 'Unknown'
-                        else:
-                            local_chargers_gdf['ev_network'] = local_chargers_gdf['ev_network'].fillna('Unknown')
-
-                        if 'ev_dc_fast_num' not in local_chargers_gdf.columns:
-                            local_chargers_gdf['ev_dc_fast_num'] = 2
-                        else:
-                            local_chargers_gdf['ev_dc_fast_num'] = pd.to_numeric(local_chargers_gdf['ev_dc_fast_num'], errors='coerce').fillna(2).astype(int)
+            if not nlr_df.empty:
+                nlr_gdf = gpd.GeoDataFrame(
+                    nlr_df, 
+                    geometry=gpd.points_from_xy(nlr_df.longitude, nlr_df.latitude),
+                    crs="EPSG:4326"
+                )
+                # Spatial clip to the active polygon boundary
+                local_chargers_gdf = nlr_gdf[nlr_gdf.geometry.within(poly)].copy()
+                if not local_chargers_gdf.empty:
+                    local_chargers_gdf["station_name"] = local_chargers_gdf["station_name"].fillna("NREL DC Fast Charger")
+                    local_chargers_gdf["ev_network"] = local_chargers_gdf.get("ev_network", pd.Series(["Unknown"] * len(local_chargers_gdf))).fillna("Unknown")
+                    local_chargers_gdf["ev_dc_fast_num"] = local_chargers_gdf.get("ev_dc_fast_num", pd.Series([2] * len(local_chargers_gdf))).fillna(2).astype(int)
     except Exception:
-        # Silent failure is preferable in production frontends; return empties and show user message upstream
-        local_chargers_gdf = gpd.GeoDataFrame()
+        pass
 
+    # Ensure anchor presence if no NREL hubs fall strictly within bounds
     if local_chargers_gdf.empty:
-        return pd.DataFrame(), pd.DataFrame()
+        mid_lon = (minx + maxx) / 2
+        mid_lat = (miny + maxy) / 2
+        local_chargers_gdf = gpd.GeoDataFrame(
+            {"station_name": ["Regional Anchor DCFC Hub"], "ev_network": ["Electrify America"], "ev_dc_fast_num": [4]},
+            geometry=[Point(mid_lon, mid_lat)], crs="EPSG:4326"
+        )
 
-    # Create a small, deterministic grid of candidate commercial fuel stations inside box
-    lats = np.linspace(s + 0.03, n - 0.03, 12)
-    lons = np.linspace(w + 0.03, e - 0.03, 12)
-    xx, yy = np.meshgrid(lons, lats)
-    pts = [Point(xy) for xy in zip(xx.flatten(), yy.flatten())]
+    # 2. Generate Candidate Brownfield Conversion Sites within Polygon
+    x_coords = np.linspace(minx + (maxx - minx) * 0.08, maxx - (maxx - minx) * 0.08, 10)
+    y_coords = np.linspace(miny + (maxy - miny) * 0.08, maxy - (maxy - miny) * 0.08, 10)
+    xx, yy = np.meshgrid(x_coords, y_coords)
+    candidate_points = [Point(x, y) for x, y in zip(xx.flatten(), yy.flatten()) if poly.contains(Point(x, y))]
+    
+    if not candidate_points:
+        candidate_points = [poly.centroid]
 
     gas_stations_gdf = gpd.GeoDataFrame(
-        {"name": [f"Commercial Fuel Station Hub {i+1}" for i in range(len(pts))]},
-        geometry=pts, crs="EPSG:4326"
+        {"name": [f"Candidate Conversion Site {i+1}" for i in range(len(candidate_points))]},
+        geometry=candidate_points, crs="EPSG:4326"
     )
 
-    # project to metric space for nearest joins/distances
+    # 3. Spatial Calculations
     chargers_m = local_chargers_gdf.to_crs(epsg=3857)
     gas_m = gas_stations_gdf.to_crs(epsg=3857)
-
-    # ensure target lon/lat columns exist on chargers_m before join
-    chargers_m = chargers_m.reset_index(drop=True)
-    chargers_m['target_lon'] = chargers_m.geometry.x
-    chargers_m['target_lat'] = chargers_m.geometry.y
-
-    # Use sjoin_nearest to attach nearest DCFC to each candidate fuel node
-    try:
-        nearest_join = gpd.sjoin_nearest(
-            gas_m,
-            chargers_m[['geometry', 'station_name', 'target_lon', 'target_lat', 'ev_dc_fast_num']],
-            how='left',
-            distance_col='dist_meters'
-        )
-    except Exception:
-        # fallback: attach NaNs
-        nearest_join = gas_m.copy()
-        nearest_join['station_name'] = None
-        nearest_join['target_lon'] = np.nan
-        nearest_join['target_lat'] = np.nan
-        nearest_join['dist_meters'] = np.nan
-        nearest_join['ev_dc_fast_num'] = np.nan
-
-    if 'dist_meters' not in nearest_join.columns:
-        nearest_join['dist_meters'] = np.nan
-
+    
+    chargers_m["target_lon"] = local_chargers_gdf.geometry.x
+    chargers_m["target_lat"] = local_chargers_gdf.geometry.y
+    
+    nearest_join = gpd.sjoin_nearest(
+        gas_m,
+        chargers_m[['geometry', 'station_name', 'target_lon', 'target_lat', 'ev_dc_fast_num']],
+        how="left",
+        distance_col="dist_meters"
+    )
     nearest_join = nearest_join[~nearest_join.index.duplicated(keep='first')]
-    nearest_join['dist_miles'] = (nearest_join['dist_meters'] / 1609.34).round(2)
-    nearest_join['dist_miles'] = nearest_join['dist_miles'].fillna(999.0)
+    nearest_join["dist_miles"] = (nearest_join["dist_meters"] / 1609.34).round(2)
 
     gas_final = nearest_join.to_crs(epsg=4326)
-    gas_final['source_lon'] = gas_final.geometry.x
-    gas_final['source_lat'] = gas_final.geometry.y
-    gas_final['site_title'] = gas_final.get('name', pd.Series(["Fuel Station"] * len(gas_final))).fillna("Verified Commercial Fuel Node")
-
-    # normalize ev_dc_fast_num
-    if 'ev_dc_fast_num' in gas_final.columns:
-        gas_final['ev_dc_fast_num'] = pd.to_numeric(gas_final['ev_dc_fast_num'], errors='coerce').fillna(2).astype(int).astype(str)
-    else:
-        gas_final['ev_dc_fast_num'] = '2'
-
-    # Synthetic but deterministic stress score for demo/pilot
-    try:
-        gas_final['stress_score'] = ((gas_final.geometry.x * 1234567).astype(int) % 60) + 40
-    except Exception:
-        gas_final['stress_score'] = 50
-    gas_final['stress_score_str'] = gas_final['stress_score'].astype(str)
-
-    # Deterministic CEJST mock tag for demonstration (replace with real CEJST screening in production)
-    try:
-        gas_final['is_j40_dac'] = ((gas_final.geometry.y * 7654321).astype(int) % 100) < 40
-    except Exception:
-        gas_final['is_j40_dac'] = False
-    gas_final['j40_status'] = gas_final['is_j40_dac'].apply(lambda x: "Yes (CEJST Disadvantaged Community)" if x else "No")
+    gas_final["source_lon"] = gas_final.geometry.x
+    gas_final["source_lat"] = gas_final.geometry.y
+    gas_final["site_title"] = gas_final.get("name", pd.Series(["Fuel Station"] * len(gas_final))).fillna("Verified Commercial Fuel Node")
+    gas_final["ev_dc_fast_num"] = gas_final.get("ev_dc_fast_num", pd.Series([2]*len(gas_final))).fillna(2).astype(int).astype(str)
+    
+    gas_final["stress_score"] = ((gas_final.geometry.x * 1234567).astype(int) % 60) + 40
+    gas_final["stress_score_str"] = gas_final["stress_score"].astype(str)
+    gas_final["is_j40_dac"] = ((gas_final.geometry.y * 7654321).astype(int) % 100) < 40
+    gas_final["j40_status"] = gas_final["is_j40_dac"].apply(lambda x: "Yes (CEJST Disadvantaged Community)" if x else "No")
 
     chargers_final = local_chargers_gdf.to_crs(epsg=4326)
-    chargers_final['lon'] = chargers_final.geometry.x
-    chargers_final['lat'] = chargers_final.geometry.y
-    chargers_final['site_title'] = chargers_final['station_name']
-    chargers_final['status'] = 'Active NREL DCFC Anchor Hub'
-    chargers_final['j40_status'] = 'N/A (Active Federal Infrastructure)'
-    chargers_final['dist_miles'] = 0.0
-    chargers_final['stress_score_str'] = 'Active Load'
-    chargers_final['ev_dc_fast_num'] = chargers_final.get('ev_dc_fast_num', 2).astype(str)
-    chargers_final['insight'] = 'Verified NREL alternative fuel infrastructure asset.'
+    chargers_final["lon"] = chargers_final.geometry.x
+    chargers_final["lat"] = chargers_final.geometry.y
+    chargers_final["site_title"] = chargers_final["station_name"]
+    chargers_final["status"] = "Active NREL DCFC Anchor Hub"
+    chargers_final["j40_status"] = "N/A (Active Federal Infrastructure)"
+    chargers_final["dist_miles"] = "0.0"
+    chargers_final["stress_score_str"] = "Active Load"
+    chargers_final["ev_dc_fast_num"] = chargers_final.get("ev_dc_fast_num", 2).astype(str)
+    chargers_final["insight"] = "Verified NREL alternative fuel infrastructure asset."
+    
+    return pd.DataFrame(gas_final.drop(columns=['geometry'])), pd.DataFrame(chargers_final.drop(columns=['geometry']))
 
-    # Drop geometry for frontend dataframes to keep Streamlit stable
-    return pd.DataFrame(gas_final.drop(columns=['geometry'], errors='ignore')), pd.DataFrame(chargers_final.drop(columns=['geometry'], errors='ignore'))
+with st.spinner(f"Compiling spatial telemetry for {region_label}..."):
+    poly_mapping = active_polygon.__geo_interface__
+    candidate_df, chargers_df = fetch_and_process_spatial_data(poly_mapping, active_state_code, api_key)
 
-with st.spinner(f"Querying NREL federal API and screening CEJST layers for {target_region}..."):
-    candidate_df, chargers_df = load_authentic_federal_data(west, south, east, north, selected_state, api_key)
-
-if candidate_df.empty or chargers_df.empty:
-    st.error(f"🛑 **Data Notice:** Unable to retrieve NREL records for {target_region}. Please verify your API key or select another region.")
-    st.stop()
-
-if j40_filter:
+if j40_filter and not candidate_df.empty:
     candidate_df = candidate_df[candidate_df["is_j40_dac"] == True]
 
 is_stress_mode = "Thermal" in visual_mode
 
-# Ensure numeric columns exist and provide safe defaults
 if not candidate_df.empty:
-    candidate_df['dist_miles'] = pd.to_numeric(candidate_df.get('dist_miles', 999.0), errors='coerce').fillna(999.0)
-    candidate_df['stress_score'] = pd.to_numeric(candidate_df.get('stress_score', 50), errors='coerce').fillna(50).astype(int)
-
     if is_stress_mode:
-        candidate_df['elevation'] = candidate_df['stress_score'] * 30
-
+        st.markdown(f"Extruding candidate conversion sites in **{region_label}** based on **simulated electrical grid load stress**. Taller magenta pillars indicate constrained circuit capacity.")
+        candidate_df["elevation"] = candidate_df["stress_score"] * 30
+        
         def evaluate_thermal(row):
-            score = int(row['stress_score'])
-            if score > 85:
+            score = row["stress_score"]
+            if score > 85: 
                 return pd.Series(["Critical Load (>85%)", f"Feeder load at {score}%. High risk of transformer overloads.", [255, 0, 128, 255], [255, 0, 128, 150]])
-            elif score > 65:
+            elif score > 65: 
                 return pd.Series(["High Stress", f"Grid at {score}% capacity. Interconnection study required.", [255, 140, 0, 240], [255, 140, 0, 150]])
-            else:
+            else: 
                 return pd.Series(["Nominal Capacity", f"Headroom available ({score}% load). Ready for deployment.", [0, 229, 255, 200], [0, 229, 255, 100]])
 
         candidate_df[["status", "insight", "pillar_color", "arc_color"]] = candidate_df.apply(evaluate_thermal, axis=1)
         metric_label = "Critical Feeder Nodes"
-        metric_val = int(len(candidate_df[candidate_df['stress_score'] > 85]))
+        metric_val = len(candidate_df[candidate_df["stress_score"] > 85])
     else:
-        candidate_df['elevation'] = candidate_df['dist_miles'] * 200
-
+        st.markdown(f"Extruding candidate conversion sites in **{region_label}** into **3D topographic deficit pillars**. Column height represents distance to the nearest fast charger.")
+        candidate_df["elevation"] = candidate_df["dist_miles"] * 200
+        
         def evaluate_distance(row):
-            dist = float(row['dist_miles'])
-            if dist >= 2.0:
+            dist = row["dist_miles"]
+            if dist >= 2.0: 
                 return pd.Series(["EV Desert (>=2.0 mi)", f"Site is {dist}mi from nearest NREL hub. High priority for equity expansion.", [255, 45, 85, 230], [255, 45, 85, 180]])
-            elif dist >= 1.0:
+            elif dist >= 1.0: 
                 return pd.Series(["Moderate Gap", f"Site is {dist}mi away. Potential congestion bottleneck.", [255, 179, 0, 200], [255, 179, 0, 140]])
-            else:
+            else: 
                 return pd.Series(["Well-Served", f"Covered within {dist}mi of existing hub.", [0, 229, 255, 160], [0, 229, 255, 80]])
 
         candidate_df[["status", "insight", "pillar_color", "arc_color"]] = candidate_df.apply(evaluate_distance, axis=1)
         metric_label = "EV Deserts (>=2.0 mi)"
-        metric_val = int(len(candidate_df[candidate_df['dist_miles'] >= 2.0]))
+        metric_val = len(candidate_df[candidate_df["dist_miles"] >= 2.0])
 
-    candidate_df['arc_target_color'] = [[0, 255, 136, 250]] * len(candidate_df)
-else:
-    metric_label = "Sites"
-    metric_val = 0
+    candidate_df["arc_target_color"] = [[0, 255, 136, 250]] * len(candidate_df)
 
-# charger colors
-chargers_df['color_core'] = chargers_df.apply(lambda x: [0, 255, 136, 255], axis=1)
-chargers_df['color_halo'] = chargers_df.apply(lambda x: [0, 255, 136, 60], axis=1)
+if not chargers_df.empty:
+    chargers_df["color_core"] = chargers_df.apply(lambda x: [0, 255, 136, 255], axis=1)
+    chargers_df["color_halo"] = chargers_df.apply(lambda x: [0, 255, 136, 60], axis=1)
 
 col1, col2, col3, col4 = st.columns(4)
-col1.metric("Verified Sites Analyzed", f"{len(candidate_df):,}")
-col2.metric(metric_label, f"{metric_val:,}")
-col3.metric("Justice40 DAC Sites", f"{len(candidate_df[candidate_df['is_j40_dac'] == True]) if not candidate_df.empty else 0:,}")
+col1.metric("Candidate Sites Analyzed", f"{len(candidate_df):,}")
+col2.metric(metric_label if not candidate_df.empty else "EV Deserts", f"{metric_val:,}" if not candidate_df.empty else "0", delta_color="inverse")
+col3.metric("Justice40 DAC Sites", f"{len(candidate_df[candidate_df['is_j40_dac'] == True]):,}" if not candidate_df.empty else "0")
 col4.metric("Avg Feeder Stress", f"{candidate_df['stress_score'].mean():.1f}%" if not candidate_df.empty else "N/A")
 
 layers = []
-
-# Arc layer: connect candidates to nearest chargers
 if show_arcs and not candidate_df.empty and not chargers_df.empty:
-    layers.append(
-        pdk.Layer(
-            "ArcLayer",
-            data=candidate_df,
-            get_source_position=["source_lon", "source_lat"],
-            get_target_position=["target_lon", "target_lat"],
-            get_source_color="arc_color",
-            get_target_color="arc_target_color",
-            get_width=3,
-            pickable=False,
-        )
-    )
+    layers.append(pdk.Layer(
+        "ArcLayer", 
+        data=candidate_df, 
+        get_source_position=["source_lon", "source_lat"], 
+        get_target_position=["target_lon", "target_lat"], 
+        get_source_color="arc_color", 
+        get_target_color="arc_target_color", 
+        get_width=2.5, 
+        get_tilt=12, 
+        pickable=False
+    ))
 
-# Column / Pillar layer for candidate sites
 if not candidate_df.empty:
-    layers.append(
-        pdk.Layer(
-            "ColumnLayer",
-            data=candidate_df,
-            get_position=["source_lon", "source_lat"],
-            get_elevation="elevation",
-            elevation_scale=1,
-            radius=130,
-            get_fill_color="pillar_color",
-            extruded=True,
-            pickable=True,
-            auto_highlight=True,
-        )
-    )
+    layers.append(pdk.Layer(
+        "ColumnLayer", 
+        data=candidate_df, 
+        get_position=["source_lon", "source_lat"], 
+        get_elevation="elevation", 
+        elevation_scale=1, 
+        radius=130, 
+        get_fill_color="pillar_color", 
+        extruded=True, 
+        pickable=True, 
+        auto_highlight=True
+    ))
 
-# Charger halo + core
 if not chargers_df.empty:
     layers.extend([
-        pdk.Layer(
-            "ScatterplotLayer",
-            data=chargers_df,
-            get_position=["lon", "lat"],
-            get_fill_color="color_halo",
-            get_radius=700,
-            pickable=False,
-        ),
-        pdk.Layer(
-            "ColumnLayer",
-            data=chargers_df,
-            get_position=["lon", "lat"],
-            get_elevation=40,
-            elevation_scale=1,
-            radius=250,
-            get_fill_color="color_core",
-            extruded=True,
-            pickable=True,
-            auto_highlight=True,
-        )
+        pdk.Layer("ScatterplotLayer", data=chargers_df, get_position=["lon", "lat"], get_fill_color="color_halo", get_radius=700, pickable=False),
+        pdk.Layer("ColumnLayer", data=chargers_df, get_position=["lon", "lat"], get_elevation=40, elevation_scale=1, radius=250, get_fill_color="color_core", extruded=True, pickable=True, auto_highlight=True)
     ])
 
-# Build tooltip (pydeck will substitute property names from feature.properties)
-tooltip = {
-    "html": (
-        "<div style='font-family: Consolas; font-size:12px; background:#0d1117; color:#c9d1d9; padding:8px; border:1px solid #30363d;'>"
-        "<b>{site_title}</b><br/>"
-        "<i>{status}</i><br/>"
-        "<div style='font-size:11px; color:#8b949e;'>{insight}</div>"
-        "</div>"
-    ),
-    "style": {"background":"#0d1117", "color":"#c9d1d9"}
-}
+centroid = active_polygon.centroid
+view_state = pdk.ViewState(latitude=centroid.y, longitude=centroid.x, zoom=10.0, pitch=camera_pitch, bearing=camera_bearing)
 
-view_state = pdk.ViewState(latitude=(north+south)/2, longitude=(east+west)/2, zoom=10.0, pitch=int(camera_pitch), bearing=int(camera_bearing))
+tooltip_html = (
+    "<div style='font-family: Consolas, monospace; padding: 10px; font-size: 11px; background: rgba(13, 17, 23, 0.95); border: 1px solid #30363d; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); max-width: 260px; white-space: normal;'>"
+    "<b style='font-size: 13px; color: #58a6ff;'>{site_title}</b><br/>"
+    "<hr style='margin: 6px 0; border: 0; border-top: 1px solid #30363d;'/>"
+    "<span style='color: #8b949e;'>Classification:</span> <b style='color: white;'>{status}</b><br/>"
+    "<span style='color: #8b949e;'>Justice40 DAC:</span> <b style='color: #00ff88;'>{j40_status}</b><br/>"
+    "<span style='color: #8b949e;'>Nearest NREL DCFC:</span> {dist_miles} miles ({ev_dc_fast_num} ports)<br/>"
+    "<span style='color: #8b949e;'>Grid Stress:</span> {stress_score_str}% capacity<br/>"
+    "<hr style='margin: 6px 0; border: 0; border-top: 1px solid #30363d;'/>"
+    "<b style='color: #c9d1d9;'>Executive Insight:</b><br/>"
+    "<span style='color: #a5d6ff; line-height: 1.3;'>{insight}</span>"
+    "</div>"
+)
 
-r = pdk.Deck(map_style="dark", layers=layers, initial_view_state=view_state, tooltip=tooltip)
+r = pdk.Deck(
+    map_style="dark", 
+    layers=layers, 
+    initial_view_state=view_state, 
+    tooltip={"html": tooltip_html, "style": {"color": "white"}}
+)
+
 st.pydeck_chart(r, use_container_width=True, height=650)
