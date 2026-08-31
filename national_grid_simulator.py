@@ -7,13 +7,13 @@ import requests
 import warnings
 
 # --- CLOUD DEPLOYMENT OPTIMIZATION ---
-ox.settings.requests_kwargs = {"headers": {"User-Agent": "EV-National-Grid-Command/1.0"}}
+ox.settings.requests_kwargs = {"headers": {"User-Agent": "EV-National-Grid-Command/2.0"}}
 ox.settings.requests_timeout = 60
 # -------------------------------------
 
 warnings.filterwarnings('ignore')
 
-st.set_page_config(layout="wide", page_title="National EV Grid Terminal")
+st.set_page_config(layout="wide", page_title="Nationwide EV Grid Terminal")
 
 st.markdown("""
 <style>
@@ -24,7 +24,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("⚡ National EV Grid & Kinetic Reach Simulator")
+st.title("⚡ Nationwide EV Grid & Kinetic Reach Simulator")
 
 # --- SECURE API KEY VALIDATION ---
 if "NREL_API_KEY" not in st.secrets:
@@ -34,55 +34,45 @@ if "NREL_API_KEY" not in st.secrets:
 api_key = st.secrets["NREL_API_KEY"]
 # ---------------------------------
 
-st.sidebar.header("🎯 Target Analysis Region")
+st.sidebar.header("🎯 Nationwide Region Selector")
 
-# Structured State & Region Selectors (Bypasses blocking geocoders entirely)
-states_dict = {
-    "Pennsylvania": {
-        "Allegheny County (Pittsburgh Metro)": (40.712, 40.219, -79.692, -80.353),
-        "Beaver County": (40.850, 40.480, -80.100, -80.580),
-        "Philadelphia County": (40.137, 39.867, -74.955, -75.280),
-    },
-    "Washington": {
-        "King County (Seattle Metro)": (47.778, 47.100, -121.100, -122.540),
-        "Yakima County": (46.750, 46.100, -119.800, -121.400),
-        "Pierce County": (47.350, 46.850, -121.500, -122.900),
-    },
-    "Colorado": {
-        "Denver County (Denver Metro)": (39.914, 39.614, -104.600, -105.150),
-        "El Paso County (Colorado Springs)": (39.100, 38.700, -104.200, -105.100),
-        "Boulder County": (40.250, 39.880, -105.050, -105.600),
-    },
-    "California": {
-        "Los Angeles County": (34.823, 32.832, -117.646, -118.945),
-        "San Diego County": (33.500, 32.500, -116.000, -117.600),
-        "San Francisco County": (37.833, 37.708, -122.356, -122.515),
-    },
-    "Texas": {
-        "Harris County (Houston Metro)": (30.150, 29.500, -94.950, -95.950),
-        "Travis County (Austin Metro)": (30.516, 30.108, -97.374, -98.083),
-        "Dallas County": (33.023, 32.618, -96.536, -97.040),
-    },
-    "Arizona": {
-        "Maricopa County (Phoenix Metro)": (33.950, 32.500, -111.000, -113.350),
-        "Pima County (Tucson)": (32.500, 31.330, -110.400, -113.300),
-    },
-    "Illinois": {
-        "Cook County (Chicago Metro)": (42.152, 41.464, -87.524, -88.264),
-    },
-    "Georgia": {
-        "Fulton County (Atlanta Metro)": (34.120, 33.590, -84.180, -84.580),
-    },
-    "Nevada": {
-        "Clark County (Las Vegas Metro)": (37.000, 35.000, -114.000, -115.900),
-    }
-}
+@st.cache_data
+def load_us_locations():
+    # Load a comprehensive public database of U.S. cities and towns with coordinates
+    url = "https://raw.githubusercontent.com/plotly/datasets/master/uscities.csv"
+    df = pd.read_csv(url)
+    df["label"] = df["city"] + ", " + df["state_id"]
+    return df
 
-selected_state = st.sidebar.selectbox("Select State", list(states_dict.keys()))
-selected_region_name = st.sidebar.selectbox("Select Region / County", list(states_dict[selected_state].keys()))
+with st.spinner("Loading nationwide U.S. geographic database..."):
+    cities_df = load_us_locations()
 
-target_region = f"{selected_region_name}, {selected_state}"
-bbox = states_dict[selected_state][selected_region_name]
+# Type-to-search selectbox containing tens of thousands of U.S. cities and towns
+city_options = cities_df["label"].tolist()
+# Default to Pittsburgh, PA if available, otherwise first option
+default_idx = city_options.index("Pittsburgh, PA") if "Pittsburgh, PA" in city_options else 0
+
+selected_city_label = st.sidebar.selectbox(
+    "Search Any U.S. City or Town", 
+    city_options,
+    index=default_idx,
+    help="Type any city name to instantly zoom and analyze its grid infrastructure."
+)
+
+# Extract selected city details
+match = cities_df[cities_df["label"] == selected_city_label].iloc[0]
+target_city = match["city"]
+target_state = match["state_id"]
+lat = match["lat"]
+lng = match["lng"]
+
+# Dynamically generate a bounding box (~20 miles square) around any selected U.S. city coordinates
+lat_delta = 0.15
+lng_delta = 0.15
+north = lat + lat_delta
+south = lat - lat_delta
+east = lng + lng_delta
+west = lng - lng_delta
 
 st.sidebar.markdown("---")
 st.sidebar.header("🕹️ Visual Engine Modes")
@@ -98,15 +88,12 @@ j40_filter = st.sidebar.checkbox("Isolate Justice40 DAC Sites", value=False)
 
 with st.sidebar.expander("🧠 Methodology & Critical Context", expanded=False):
     st.markdown("""
+    **Nationwide Coordinate-Radius Engine**
+    By leveraging open geographic coordinate datasets paired with direct coordinate bounding boxes (`ox.features_from_bbox`), this tool bypasses slow and restrictive geocoding servers. You can analyze any city or town in the United States instantly.
+
     **The Visual Metaphor: Pillars vs. Glowing Pads**
-    *   **Neon Green Glowing Pads:** These represent *existing* active DC Fast Charging hubs. 
-    *   **Extruded 3D Pillars:** These represent *existing gas stations*, acting as candidate conversion sites. The height of the pillar visualizes the systemic value of ripping out a gas pump and replacing it with a DCFC node.
-
-    **Why a 2.0 Mile Threshold?**
-    In urban topologies, a 2-mile spatial gap is a structural barrier. For the 30%+ of residents in multi-unit dwellings (MUDs) who cannot charge at home, driving over 2 miles exclusively to "fuel up" destroys the EV value proposition. 
-
-    **Grid Thermal Limits Explained**
-    "Thermal Capacity" refers to the physical heat limit of local distribution wires. A standard 4-port 150kW DCFC station demands 600kW of instantaneous power. Forcing that load through an older feeder causes the lines to melt. "Magenta" sites require expensive utility Make-Ready Upgrades before chargers can be installed.
+    *   **Neon Green Glowing Pads:** Existing active DC Fast Charging hubs.
+    *   **Extruded 3D Pillars:** Existing gas stations acting as candidate conversion sites, sized by their distance deficit or grid stress.
     """)
 
 st.sidebar.markdown("---")
@@ -116,25 +103,17 @@ camera_pitch = st.sidebar.slider("Camera Pitch", min_value=30, max_value=60, val
 camera_bearing = st.sidebar.slider("Camera Rotation", min_value=-180, max_value=180, value=-22, step=2)
 
 @st.cache_data
-def load_live_data(north, south, east, west, state_name, nrel_key):
+def load_live_data(w, s, e, n, state_code, nrel_key):
     tags = {"amenity": "fuel"}
     try:
-        # Queries OpenStreetMap using direct coordinate bounds (Zero geocoding failure)
-        gas_stations_gdf = ox.features_from_bbox(north, south, east, west, tags=tags)
+        bbox_tuple = (w, s, e, n)
+        gas_stations_gdf = ox.features_from_bbox(bbox_tuple, tags=tags)
         if gas_stations_gdf.empty:
             raise ValueError("No gas stations found.")
         gas_stations_gdf = gas_stations_gdf[gas_stations_gdf.geometry.type == "Point"].copy()
         gas_stations_gdf = gas_stations_gdf.to_crs(epsg=4326)
     except Exception:
         return pd.DataFrame(), pd.DataFrame()
-    
-    # Map full state names to 2-letter postal codes for NREL API filtering
-    state_codes = {
-        "Pennsylvania": "PA", "Washington": "WA", "Colorado": "CO", 
-        "California": "CA", "Texas": "TX", "Arizona": "AZ", 
-        "Illinois": "IL", "Georgia": "GA", "Nevada": "NV"
-    }
-    state_code = state_codes.get(state_name, "PA")
     
     nlr_url = (
         "https://developer.nlr.gov/api/alt-fuel-stations/v1.json?"
@@ -156,10 +135,9 @@ def load_live_data(north, south, east, west, state_name, nrel_key):
                     geometry=gpd.points_from_xy(nlr_df.longitude, nlr_df.latitude),
                     crs="EPSG:4326"
                 )
-                # Clip NREL stations precisely to the selected region's bounding box
                 local_chargers_gdf = nlr_gdf[
-                    (nlr_gdf.geometry.y >= south) & (nlr_gdf.geometry.y <= north) &
-                    (nlr_gdf.geometry.x >= west) & (nlr_gdf.geometry.x <= east)
+                    (nlr_gdf.geometry.y >= s) & (nlr_gdf.geometry.y <= n) &
+                    (nlr_gdf.geometry.x >= w) & (nlr_gdf.geometry.x <= e)
                 ].copy()
                 
                 if not local_chargers_gdf.empty:
@@ -172,7 +150,8 @@ def load_live_data(north, south, east, west, state_name, nrel_key):
     if local_chargers_gdf.empty:
         tags_ev = {"amenity": "charging_station"}
         try:
-            ev_osm = ox.features_from_bbox(north, south, east, west, tags=tags_ev)
+            bbox_tuple = (w, s, e, n)
+            ev_osm = ox.features_from_bbox(bbox_tuple, tags=tags_ev)
             ev_osm = ev_osm.to_crs(epsg=4326)
             ev_osm['geometry'] = ev_osm.geometry.centroid
             local_chargers_gdf = ev_osm.copy()
@@ -237,9 +216,8 @@ def load_live_data(north, south, east, west, state_name, nrel_key):
         
     return pd.DataFrame(gas_final.drop(columns=['geometry'])), chargers_df_out
 
-with st.spinner(f"Compiling 3D spatial network for {target_region}..."):
-    north, south, east, west = bbox
-    candidate_df, chargers_df = load_live_data(north, south, east, west, selected_state, api_key)
+with st.spinner(f"Compiling 3D spatial network for {target_city}, {target_state}..."):
+    candidate_df, chargers_df = load_live_data(west, south, east, north, target_state, api_key)
 
 if j40_filter and not candidate_df.empty:
     candidate_df = candidate_df[candidate_df["is_j40_dac"] == True]
@@ -248,7 +226,7 @@ is_stress_mode = "Thermal" in visual_mode
 
 if not candidate_df.empty:
     if is_stress_mode:
-        st.markdown(f"Extruding candidate conversion sites in **{target_region}** based on **simulated electrical grid load stress**. Taller magenta pillars indicate highly constrained local grid capacity.")
+        st.markdown(f"Extruding candidate conversion sites in **{target_city}, {target_state}** based on **simulated electrical grid load stress**. Taller magenta pillars indicate highly constrained local grid capacity.")
         candidate_df["elevation"] = candidate_df["stress_score"] * 30
         
         def evaluate_thermal(row):
@@ -268,7 +246,7 @@ if not candidate_df.empty:
         metric_val = len(candidate_df[candidate_df["stress_score"] > 85])
         
     else:
-        st.markdown(f"Extruding candidate conversion sites in **{target_region}** into **3D topographic deficit pillars**. Column height represents physical distance to the nearest fast charger.")
+        st.markdown(f"Extruding candidate conversion sites in **{target_city}, {target_state}** into **3D topographic deficit pillars**. Column height represents physical distance to the nearest fast charger.")
         candidate_df["elevation"] = candidate_df["dist_miles"] * 200
         
         def evaluate_distance(row):
@@ -355,9 +333,9 @@ if not chargers_df.empty:
     layers.extend([layer_hub_halo, layer_hub_core])
 
 view_state = pdk.ViewState(
-    latitude=candidate_df["source_lat"].mean() if not candidate_df.empty else 39.8283,
-    longitude=candidate_df["source_lon"].mean() if not candidate_df.empty else -98.5795,
-    zoom=9.8 if not candidate_df.empty else 4,
+    latitude=lat,
+    longitude=lng,
+    zoom=10.5,
     pitch=camera_pitch,
     bearing=camera_bearing
 )
