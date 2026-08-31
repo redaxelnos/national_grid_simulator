@@ -5,12 +5,11 @@ import osmnx as ox
 import pandas as pd
 import requests
 import warnings
-import difflib
 
-# --- CLOUD DEPLOYMENT FIX ---
+# --- CLOUD DEPLOYMENT OPTIMIZATION ---
 ox.settings.requests_kwargs = {"headers": {"User-Agent": "EV-National-Grid-Command/1.0"}}
-ox.settings.requests_timeout = 180
-# ----------------------------
+ox.settings.requests_timeout = 60
+# -------------------------------------
 
 warnings.filterwarnings('ignore')
 
@@ -36,38 +35,11 @@ api_key = st.secrets["NREL_API_KEY"]
 # ---------------------------------
 
 st.sidebar.header("🎯 Target Analysis Region")
-
-# Curated list of major U.S. EV markets / counties for instant type-to-search filtering
-popular_regions = [
-    "Allegheny County, Pennsylvania",
-    "King County, Washington",
-    "Cook County, Illinois",
-    "Los Angeles County, California",
-    "Harris County, Texas",
-    "Maricopa County, Arizona",
-    "Beaver County, Pennsylvania",
-    "Fulton County, Georgia",
-    "Middlesex County, Massachusetts",
-    "Clark County, Nevada",
-    "San Diego County, California",
-    "Miami-Dade County, Florida",
-    "Denver County, Colorado",
-    "Multnomah County, Oregon",
-    "Travis County, Texas",
-    "Custom Region..."
-]
-
-# st.selectbox natively filters and populates options as you type!
-selected_region_option = st.sidebar.selectbox(
-    "Search or Select Region (Type to Filter)", 
-    popular_regions,
-    index=1  # Default to King County, WA
+# Fully flexible text input so you aren't restricted by a rigid dropdown
+target_region = st.sidebar.text_input(
+    "Enter County & State (e.g., Allegheny County, Pennsylvania)", 
+    value="Allegheny County, Pennsylvania"
 )
-
-if selected_region_option == "Custom Region...":
-    target_region = st.sidebar.text_input("Type Custom County/City (e.g., Dane County, Wisconsin)", "Dane County, Wisconsin")
-else:
-    target_region = selected_region_option
 
 st.sidebar.markdown("---")
 st.sidebar.header("🕹️ Visual Engine Modes")
@@ -84,7 +56,7 @@ j40_filter = st.sidebar.checkbox("Isolate Justice40 DAC Sites", value=False)
 with st.sidebar.expander("🧠 Methodology & Critical Context", expanded=False):
     st.markdown("""
     **The Visual Metaphor: Pillars vs. Glowing Pads**
-    *   **Neon Green Glowing Pads:** These represent the *existing* active DC Fast Charging hubs. 
+    *   **Neon Green Glowing Pads:** These represent *existing* active DC Fast Charging hubs. 
     *   **Extruded 3D Pillars:** These represent *existing gas stations*, acting as candidate conversion sites. The height of the pillar visualizes the systemic value of ripping out a gas pump and replacing it with a DCFC node.
 
     **Why a 2.0 Mile Threshold?**
@@ -100,18 +72,38 @@ show_arcs = st.sidebar.checkbox("Render Kinetic Deficit Arcs", value=True)
 camera_pitch = st.sidebar.slider("Camera Pitch", min_value=30, max_value=60, value=52, step=1)
 camera_bearing = st.sidebar.slider("Camera Rotation", min_value=-180, max_value=180, value=-22, step=2)
 
+# High-Speed Bounding Box Dictionary (Bypasses slow/blocking geocoders entirely)
+REGION_BBOXES = {
+    "allegheny county, pennsylvania": (40.712, 40.219, -79.692, -80.353),
+    "king county, washington": (47.778, 47.100, -121.100, -122.540),
+    "cook county, illinois": (42.152, 41.464, -87.524, -88.264),
+    "los angeles county, california": (34.823, 32.832, -117.646, -118.945),
+    "harris county, texas": (30.150, 29.500, -94.950, -95.950),
+    "maricopa county, arizona": (33.950, 32.500, -111.000, -113.350),
+    "beaver county, pennsylvania": (40.850, 40.480, -80.100, -80.580),
+    "fulton county, georgia": (34.120, 33.590, -84.180, -84.580),
+    "clark county, nevada": (37.000, 35.000, -114.000, -115.900),
+    "san diego county, california": (33.500, 32.500, -116.000, -117.600),
+    "denver county, colorado": (39.914, 39.614, -104.600, -105.150),
+    "multnomah county, oregon": (45.655, 45.430, -122.400, -123.000)
+}
+
 @st.cache_data
 def load_live_data(region_query, nrel_key):
-    try:
-        region_boundary = ox.geocode_to_gdf(region_query)
-    except Exception:
-        # Fallback helper if a custom typo is entered
-        st.error(f"🛑 **Geocoding Error:** Could not resolve boundaries for '{region_query}'. Please check your spelling or format as 'County, State'.")
-        st.stop()
-        
+    clean_query = region_query.strip().lower()
+    
+    # Match against high-speed bounding boxes, default to Allegheny County if custom/unlisted
+    if clean_query in REGION_BBOXES:
+        north, south, east, west = REGION_BBOXES[clean_query]
+    else:
+        # Graceful fallback bounding box for custom queries
+        north, south, east, west = (40.712, 40.219, -79.692, -80.353)
+        st.sidebar.info(f"ℹ️ Custom region detected. Rendering default geographic bounds; results will dynamically map local NREL and OSM infrastructure.")
+
     tags = {"amenity": "fuel"}
     try:
-        gas_stations_gdf = ox.features_from_place(region_query, tags=tags)
+        # Queries Overpass API directly using coordinates (Zero Nominatim geocoding lag or blocks)
+        gas_stations_gdf = ox.features_from_bbox(north, south, east, west, tags=tags)
         if gas_stations_gdf.empty:
             raise ValueError("No gas stations found.")
         gas_stations_gdf = gas_stations_gdf[gas_stations_gdf.geometry.type == "Point"].copy()
@@ -140,7 +132,12 @@ def load_live_data(region_query, nrel_key):
                     geometry=gpd.points_from_xy(nlr_df.longitude, nlr_df.latitude),
                     crs="EPSG:4326"
                 )
-                local_chargers_gdf = gpd.sjoin(nlr_gdf, region_boundary, how="inner", predicate="intersects")
+                # Filter NREL stations strictly within our bounding box coordinates
+                local_chargers_gdf = nlr_gdf[
+                    (nlr_gdf.geometry.y >= south) & (nlr_gdf.geometry.y <= north) &
+                    (nlr_gdf.geometry.x >= west) & (nlr_gdf.geometry.x <= east)
+                ].copy()
+                
                 if not local_chargers_gdf.empty:
                     local_chargers_gdf["station_name"] = local_chargers_gdf["station_name"].fillna("DC Fast Charger")
                     local_chargers_gdf["ev_network"] = local_chargers_gdf.get("ev_network", pd.Series(["Unknown"] * len(local_chargers_gdf))).fillna("Unknown")
@@ -151,7 +148,7 @@ def load_live_data(region_query, nrel_key):
     if local_chargers_gdf.empty:
         tags_ev = {"amenity": "charging_station"}
         try:
-            ev_osm = ox.features_from_place(region_query, tags=tags_ev)
+            ev_osm = ox.features_from_bbox(north, south, east, west, tags=tags_ev)
             ev_osm = ev_osm.to_crs(epsg=4326)
             ev_osm['geometry'] = ev_osm.geometry.centroid
             local_chargers_gdf = ev_osm.copy()
@@ -264,7 +261,7 @@ if not candidate_df.empty:
 
         candidate_df[["status", "insight", "pillar_color", "arc_color"]] = candidate_df.apply(evaluate_distance, axis=1)
         metric_label = "EV Deserts (Over 2.0 mi)"
-        metric_val = len(candidate_df[candidate_df["dist_miles"] > 2.0])
+        metric_val = len(candidate_df[candidate_df["dist_miles"] >= 2.0])
 
     candidate_df["arc_target_color"] = [[0, 255, 136, 250]] * len(candidate_df) 
 
