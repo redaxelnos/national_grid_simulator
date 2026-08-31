@@ -1,11 +1,12 @@
 import streamlit as st
 import pydeck as pdk
-import requests
 import folium
 from folium.plugins import Draw
 from streamlit_folium import st_folium
 from shapely.geometry import shape
 import pandas as pd
+import psycopg2
+import json
 
 # ---------------------------------------------------------
 # Grid Terminal CSS Styling
@@ -24,6 +25,13 @@ st.markdown("""
 st.title("⚡ EV Grid Command & Kinetic Reach Simulator")
 
 # ---------------------------------------------------------
+# Database Connection (Securely via Streamlit Secrets)
+# ---------------------------------------------------------
+@st.cache_resource
+def get_db_connection():
+    return psycopg2.connect(st.secrets["DATABASE_URL"])
+
+# ---------------------------------------------------------
 # Sidebar Controls & Reset Button
 # ---------------------------------------------------------
 st.sidebar.header("🎯 Spatial Boundary Tool")
@@ -33,8 +41,6 @@ if st.sidebar.button("🔄 Reset / Clear Drawn Boundary", use_container_width=Tr
     for key in list(st.session_state.keys()):
         del st.session_state[key]
     st.rerun()
-
-API_URL = "http://localhost:8000/api/analyze-region"
 
 st.sidebar.markdown("---")
 st.sidebar.header("📊 Infrastructure Layer Focus")
@@ -106,32 +112,61 @@ if not active_polygon:
     st.stop()
 
 # ---------------------------------------------------------
-# Query FastAPI Backend & PostGIS (with 60s Timeout)
+# Direct PostGIS Query Engine
 # ---------------------------------------------------------
+polygon_str = json.dumps(active_polygon.__geo_interface__)
+
+candidates_query = """
+WITH input_poly AS (
+    SELECT ST_SetSRID(ST_GeomFromGeoJSON(%s), 4326) AS geom
+),
+regional_candidates AS (
+    SELECT fuel_stations.site_name, fuel_stations.geom 
+    FROM fuel_stations, input_poly
+    WHERE ST_Intersects(fuel_stations.geom, input_poly.geom)
+)
+SELECT 
+    c.site_name,
+    ST_X(c.geom) AS source_lon,
+    ST_Y(c.geom) AS source_lat,
+    e.station_name AS nearest_charger,
+    ST_X(e.geom) AS target_lon,
+    ST_Y(e.geom) AS target_lat,
+    ST_Distance(c.geom::geography, e.geom::geography) / 1609.34 AS dist_miles
+FROM regional_candidates c
+CROSS JOIN LATERAL (
+    SELECT station_name, geom 
+    FROM ev_chargers 
+    ORDER BY c.geom <-> geom 
+    LIMIT 1
+) e;
+"""
+
+chargers_query = """
+WITH input_poly AS (
+    SELECT ST_SetSRID(ST_GeomFromGeoJSON(%s), 4326) AS geom
+)
+SELECT 
+    ev_chargers.station_name,
+    ev_chargers.ports,
+    ST_X(ev_chargers.geom) AS lon,
+    ST_Y(ev_chargers.geom) AS lat
+FROM ev_chargers, input_poly
+WHERE ST_Intersects(ev_chargers.geom, input_poly.geom);
+"""
+
 with st.spinner("Querying PostGIS spatial engine..."):
     try:
-        response = requests.post(
-            API_URL, 
-            json={"geojson": active_polygon.__geo_interface__}, 
-            timeout=60
-        )
-        if response.status_code == 200:
-            res_json = response.json()
-            candidate_data = res_json.get("candidates", [])
-            charger_data = res_json.get("chargers", [])
-        else:
-            st.error(f"Backend API Error: {response.status_code} - {response.text}")
-            candidate_data, charger_data = [], []
-    except requests.exceptions.ConnectionError:
-        st.error("Could not connect to FastAPI backend. Ensure `uvicorn api:app --reload --port 8000` is running.")
-        candidate_data, charger_data = [], []
+        conn = get_db_connection()
+        df = pd.read_sql(candidates_query, conn, params=(polygon_str,))
+        chargers_df = pd.read_sql(chargers_query, conn, params=(polygon_str,))
+    except Exception as e:
+        st.error(f"Database Query Error: {e}")
+        df, chargers_df = pd.DataFrame(), pd.DataFrame()
 
-if not candidate_data and not charger_data:
+if df.empty and chargers_df.empty:
     st.warning("No sites found within the drawn boundary. Try drawing a larger box over a metropolitan area like Pittsburgh.")
     st.stop()
-
-df = pd.DataFrame(candidate_data)
-chargers_df = pd.DataFrame(charger_data)
 
 # Enrich candidate data if present
 if not df.empty:
