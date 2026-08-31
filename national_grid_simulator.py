@@ -5,10 +5,11 @@ import osmnx as ox
 import pandas as pd
 import requests
 import warnings
+import numpy as np
 from shapely.geometry import Point
 
 # --- CLOUD DEPLOYMENT OPTIMIZATION ---
-ox.settings.requests_kwargs = {"headers": {"User-Agent": "EV-National-Grid-Command/6.0"}}
+ox.settings.requests_kwargs = {"headers": {"User-Agent": "EV-National-Grid-Command/6.1"}}
 ox.settings.requests_timeout = 45
 # -------------------------------------
 
@@ -37,7 +38,6 @@ api_key = st.secrets["NREL_API_KEY"]
 
 st.sidebar.header("🎯 Nationwide Region Selector")
 
-# Comprehensive Nationwide Directory covering key U.S. Counties & Metros
 nationwide_regions = {
     "Pennsylvania": {
         "Allegheny County (Pittsburgh Metro)": (-80.353, 40.219, -79.692, 40.712),
@@ -111,7 +111,6 @@ camera_bearing = st.sidebar.slider("Camera Rotation", min_value=-180, max_value=
 
 @st.cache_data
 def load_live_federal_data(w, s, e, n, state_name, nrel_key):
-    # 1. Fetch Real OpenStreetMap Fuel Stations (Candidate Conversion Sites)
     tags = {"amenity": "fuel"}
     gas_stations_gdf = gpd.GeoDataFrame()
     try:
@@ -123,7 +122,6 @@ def load_live_federal_data(w, s, e, n, state_name, nrel_key):
     except Exception:
         pass
     
-    # Fallback to real urban coordinates if Overpass times out
     if gas_stations_gdf.empty:
         lats = np.linspace(s + 0.05, n - 0.05, 10)
         lons = np.linspace(w + 0.05, e - 0.05, 10)
@@ -137,7 +135,6 @@ def load_live_federal_data(w, s, e, n, state_name, nrel_key):
     if len(gas_stations_gdf) > 120:
         gas_stations_gdf = gas_stations_gdf.sample(n=120, random_state=42)
 
-    # 2. Fetch Real NREL Alternative Fuel Chargers
     state_codes = {
         "Pennsylvania": "PA", "Washington": "WA", "Colorado": "CO", 
         "California": "CA", "Texas": "TX", "Arizona": "AZ", 
@@ -188,7 +185,6 @@ def load_live_federal_data(w, s, e, n, state_name, nrel_key):
             geometry=hub_pts, crs="EPSG:4326"
         )
 
-    # Spatial sjoin calculation
     chargers_m = local_chargers_gdf.to_crs(epsg=3857)
     gas_m = gas_stations_gdf.to_crs(epsg=3857)
     
@@ -210,11 +206,9 @@ def load_live_federal_data(w, s, e, n, state_name, nrel_key):
     gas_final["site_title"] = gas_final.get("name", pd.Series(["Gas Station"] * len(gas_final))).fillna("Candidate Conversion Site")
     gas_final["ev_dc_fast_num"] = gas_final.get("ev_dc_fast_num", pd.Series([2]*len(gas_final))).fillna(2).astype(int).astype(str)
     
-    # Realistic Feeder Stress & CEJST Justice40 Tagging
     gas_final["stress_score"] = ((gas_final.geometry.x * 1234567).astype(int) % 60) + 40
     gas_final["stress_score_str"] = gas_final["stress_score"].astype(str)
     
-    # CEJST Justice40 screening criteria based on environmental burden indicators
     gas_final["is_j40_dac"] = ((gas_final.geometry.y * 7654321).astype(int) % 100) < 42
     gas_final["j40_status"] = gas_final["is_j40_dac"].apply(lambda x: "Yes (CEJST Disadvantaged Tract)" if x else "No")
 
