@@ -5,24 +5,14 @@ import osmnx as ox
 import pandas as pd
 import requests
 import warnings
-import os
 
 # --- CLOUD DEPLOYMENT FIX ---
 ox.settings.requests_kwargs = {"headers": {"User-Agent": "EV-National-Grid-Command/1.0"}}
 ox.settings.requests_timeout = 180
 # ----------------------------
 
-if not os.path.exists(".streamlit"):
-    os.makedirs(".streamlit")
-if not os.path.exists(".streamlit/secrets.toml"):
-    with open(".streamlit/secrets.toml", "w") as f:
-        f.write('NREL_API_KEY = "ZKe4KCw4IyoPLtafYKWb6uPdDipAx9To9tOTQGry"\n')
-
 warnings.filterwarnings('ignore')
 
-# ---------------------------------------------------------
-# Grid Terminal CSS Styling
-# ---------------------------------------------------------
 st.set_page_config(layout="wide", page_title="National EV Grid Terminal")
 
 st.markdown("""
@@ -36,11 +26,15 @@ st.markdown("""
 
 st.title("⚡ National EV Grid & Kinetic Reach Simulator")
 
-# ---------------------------------------------------------
-# Sidebar Controls & Search Engine
-# ---------------------------------------------------------
+# --- SECURE API KEY VALIDATION (No hardcoded keys in script) ---
+if "NREL_API_KEY" not in st.secrets:
+    st.error("🛑 **API Key Missing:** Please add your `NREL_API_KEY` to the Streamlit Cloud Advanced Settings Secrets box or your local `.streamlit/secrets.toml` file.")
+    st.stop()
+
+api_key = st.secrets["NREL_API_KEY"]
+# -------------------------------------------------------------
+
 st.sidebar.header("🎯 Target Analysis Region")
-# Dynamic search engine for nationwide scaling
 target_region = st.sidebar.text_input("Enter City or County", "King County, Washington")
 
 st.sidebar.markdown("---")
@@ -65,7 +59,7 @@ with st.sidebar.expander("🧠 Methodology & Critical Context", expanded=False):
     In urban topologies, a 2-mile spatial gap is a structural barrier. For the 30%+ of residents in multi-unit dwellings (MUDs) who cannot charge at home, driving over 2 miles exclusively to "fuel up" destroys the EV value proposition. 
 
     **Grid Thermal Limits Explained**
-    "Thermal Capacity" refers to the physical heat limit of local distribution wires. A 4-port 150kW DCFC station demands 600kW of instantaneous power. Forcing that load through an older feeder causes the lines to melt. "Magenta" sites require expensive utility Make-Ready Upgrades before chargers can be installed.
+    "Thermal Capacity" refers to the physical heat limit of local distribution wires. A standard 4-port 150kW DCFC station demands 600kW of instantaneous power. Forcing that load through an older feeder causes the lines to melt. "Magenta" sites require expensive utility Make-Ready Upgrades before chargers can be installed.
     """)
 
 st.sidebar.markdown("---")
@@ -75,15 +69,13 @@ camera_pitch = st.sidebar.slider("Camera Pitch", min_value=30, max_value=60, val
 camera_bearing = st.sidebar.slider("Camera Rotation", min_value=-180, max_value=180, value=-22, step=2)
 
 @st.cache_data
-def load_live_data(region_query):
-    # 1. Geocode User Target Region
+def load_live_data(region_query, nrel_key):
     try:
         region_boundary = ox.geocode_to_gdf(region_query)
     except Exception:
         st.error(f"🛑 **Geocoding Error:** Could not resolve boundaries for '{region_query}'. Try formatting as 'County, State' or 'City, State'.")
         st.stop()
         
-    # 2. Fetch Local Candidate Sites via OSMnx
     tags = {"amenity": "fuel"}
     try:
         gas_stations_gdf = ox.features_from_place(region_query, tags=tags)
@@ -95,12 +87,9 @@ def load_live_data(region_query):
         st.warning(f"No candidate conversion sites found in {region_query}.")
         return pd.DataFrame(), pd.DataFrame()
     
-    # 3. Fetch Nationwide Fast Chargers (Filtered down to the requested region)
-    api_key = st.secrets["NREL_API_KEY"]
-    # Removed state=PA parameter to pull the entire United States
     nlr_url = (
         "https://developer.nlr.gov/api/alt-fuel-stations/v1.json?"
-        f"api_key={api_key}&fuel_type=ELEC&ev_charging_level=dc_fast&country=US"
+        f"api_key={nrel_key}&fuel_type=ELEC&ev_charging_level=dc_fast&country=US"
     )
     
     local_chargers_gdf = gpd.GeoDataFrame()
@@ -118,7 +107,6 @@ def load_live_data(region_query):
                     geometry=gpd.points_from_xy(nlr_df.longitude, nlr_df.latitude),
                     crs="EPSG:4326"
                 )
-                # Clip the nationwide dataset to the user's searched county
                 local_chargers_gdf = gpd.sjoin(nlr_gdf, region_boundary, how="inner", predicate="intersects")
                 if not local_chargers_gdf.empty:
                     local_chargers_gdf["station_name"] = local_chargers_gdf["station_name"].fillna("DC Fast Charger")
@@ -127,7 +115,6 @@ def load_live_data(region_query):
     except Exception:
         pass
     
-    # OSM Fallback
     if local_chargers_gdf.empty:
         tags_ev = {"amenity": "charging_station"}
         try:
@@ -142,13 +129,10 @@ def load_live_data(region_query):
             pass
 
     if local_chargers_gdf.empty:
-        st.warning(f"No existing DC Fast Chargers found in {region_query}.")
         chargers_m = gpd.GeoDataFrame()
     else:
-        # Use appropriate CRS for accurate spatial math based on longitude
         chargers_m = local_chargers_gdf.to_crs(epsg=3857)
 
-    # 4. Spatial Math (Using Web Mercator EPSG:3857 for nationwide compatibility)
     gas_m = gas_stations_gdf.to_crs(epsg=3857)
     
     if not chargers_m.empty:
@@ -176,15 +160,12 @@ def load_live_data(region_query):
     gas_final["site_title"] = gas_final.get("name", pd.Series(["Gas Station"] * len(gas_final))).fillna("Candidate Conversion Site")
     gas_final["ev_dc_fast_num"] = gas_final.get("ev_dc_fast_num", pd.Series([0]*len(gas_final))).fillna(0).astype(int).astype(str)
     
-    # Generate deterministic "Stress Score"
     gas_final["stress_score"] = ((gas_final.geometry.x * 1234567).astype(int) % 60) + 40
     gas_final["stress_score_str"] = gas_final["stress_score"].astype(str)
     
-    # Simulate Justice40 DAC Status
     gas_final["is_j40_dac"] = ((gas_final.geometry.y * 7654321).astype(int) % 100) < 40
     gas_final["j40_status"] = gas_final["is_j40_dac"].apply(lambda x: "Yes (Priority Funding Eligible)" if x else "No")
 
-    # Process Charger Nodes 
     if not local_chargers_gdf.empty:
         chargers_final = local_chargers_gdf.to_crs(epsg=4326)
         chargers_final["lon"] = chargers_final.geometry.x
@@ -203,15 +184,11 @@ def load_live_data(region_query):
     return pd.DataFrame(gas_final.drop(columns=['geometry'])), chargers_df_out
 
 with st.spinner(f"Compiling 3D spatial network for {target_region}..."):
-    candidate_df, chargers_df = load_live_data(target_region)
+    candidate_df, chargers_df = load_live_data(target_region, api_key)
 
-# Apply Justice40 Filter if toggled
 if j40_filter and not candidate_df.empty:
     candidate_df = candidate_df[candidate_df["is_j40_dac"] == True]
 
-# ---------------------------------------------------------
-# Dynamic Mode Physics & Safe-HTML Tooltip Generation
-# ---------------------------------------------------------
 is_stress_mode = "Thermal" in visual_mode
 
 if not candidate_df.empty:
@@ -262,18 +239,12 @@ if not chargers_df.empty:
     chargers_df["color_core"] = chargers_df.apply(lambda x: [0, 255, 136, 255], axis=1) 
     chargers_df["color_halo"] = chargers_df.apply(lambda x: [0, 255, 136, 60], axis=1)  
 
-# ---------------------------------------------------------
-# Executive KPI Metrics
-# ---------------------------------------------------------
 col1, col2, col3, col4 = st.columns(4)
 col1.metric("Target Sites Analyzed", f"{len(candidate_df):,}")
 col2.metric(metric_label if not candidate_df.empty else "EV Deserts", f"{metric_val:,}" if not candidate_df.empty else "0", delta_color="inverse")
 col3.metric("Justice40 Eligible Sites", f"{len(candidate_df[candidate_df['is_j40_dac'] == True]):,}" if not candidate_df.empty else "0")
 col4.metric("Avg Feeder Stress", f"{candidate_df['stress_score'].mean():.1f}%" if not candidate_df.empty else "N/A")
 
-# ---------------------------------------------------------
-# PyDeck Layers 
-# ---------------------------------------------------------
 layers = []
 
 if show_arcs and not candidate_df.empty and not chargers_df.empty:
@@ -336,7 +307,6 @@ view_state = pdk.ViewState(
     bearing=camera_bearing
 )
 
-# Mobile-Optimized Tooltip
 tooltip_html = (
     "<div style='font-family: Consolas, monospace; padding: 10px; font-size: 11px; background: rgba(13, 17, 23, 0.95); border: 1px solid #30363d; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); max-width: 240px; white-space: normal; word-wrap: break-word;'>"
     "<b style='font-size: 13px; color: #58a6ff;'>{site_title}</b><br/>"
