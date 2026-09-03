@@ -56,7 +56,6 @@ ISO_FOOTPRINTS = {
 
 def get_all_intersecting_isos(polygon):
     affected = []
-    for key, data in ISO_FOOTPRINTS.items();  # Wait, let's keep it clean
     for key, data in ISO_FOOTPRINTS.items():
         poly_box = box(*data["bounds"])
         if polygon.intersects(poly_box):
@@ -89,10 +88,6 @@ if input_mode == "Select Region / ISO (Instant Scope)":
     map_center = list(iso_info["center"])
     map_zoom = 6
     st.sidebar.success(f"⚡ Scope locked to **{iso_info['name']}**.")
-    
-    if st.sidebar.button("🔄 Reset View", use_container_width=True):
-        st.rer()
-
 else:
     st.sidebar.markdown("Draw a polygon or rectangle anywhere in the U.S. on the interactive map below.")
     if st.sidebar.button("🔄 Reset / Clear Drawn Boundary", use_container_width=True):
@@ -127,7 +122,7 @@ j40_filter = st.sidebar.checkbox("Isolate Justice40 DAC Sites", value=False, hel
 with st.sidebar.expander("🧠 Methodology & Critical Context", expanded=True):
     st.markdown("""
     **The Visual Metaphor: Pillars vs. Glowing Pads**
-    *   **Neon Green Glowing Pads:** Represent existing active DC Fast-Charging hubs. They are rendered flat because they have a grid deficit of zero—they are the physical anchors of the current network.
+    *   **Neon Green Glowing Pads:** Represent existing active DC Fast-Charging hubs. They are rendered flat because they have a grid deficit of zero—they are geothermal/physical anchors of the current network.
     *   **Extruded 3D Pillars:** Represent existing gas stations, acting as our candidate conversion sites. Why gas stations? They are the ultimate “brownfield” targets for EV infrastructure. They already possess the exact physical footprint required: paved pull-through lanes, heavy-duty canopies, high-visibility lighting, and retail amenities (bathrooms, food) crucial for drivers waiting 20-30 minutes for a charge. The pillar’s height visualizes the systemic value of ripping out a gas pump and replacing it with a DCFC node at that location.
 
     **Why a 2.0 Mile Threshold?**
@@ -151,7 +146,7 @@ camera_pitch = st.sidebar.slider("Camera Pitch", min_value=30, max_value=60, val
 camera_bearing = st.sidebar.slider("Camera Rotation", min_value=-180, max_value=180, value=-22, step=2)
 
 # ---------------------------------------------------------
-# Interactive Folium Map (Rendered if Manual Draw Mode is Active)
+# Interactive Folium Map
 # ---------------------------------------------------------
 m = folium.Map(location=map_center, zoom_start=map_zoom, tiles="CartoDB dark_matter")
 Draw(
@@ -174,7 +169,6 @@ with map_container:
             geom_dict = draw_output["last_active_drawing"]["geometry"]
             active_polygon = shape(geom_dict)
     else:
-        # Display static interactive preview for pre-scoped regional selection
         st_folium(m, width="100%", height=400, key="static_iso_map")
 
 if not active_polygon:
@@ -499,7 +493,6 @@ if show_candidates and not df.empty:
 if show_chargers and not chargers_df.empty:
     layer_hub_halo = pdk.Layer(
         "ScatterplotLayer",
-        id="charger_halo",
         data=chargers_df,
         get_position=["lon", "lat"],
         get_fill_color="color_halo",
@@ -508,7 +501,6 @@ if show_chargers and not chargers_df.empty:
     )
     layer_hub_core = pdk.Layer(
         "ColumnLayer",
-        id="charger_core",
         data=chargers_df,
         get_position=["lon", "lat"],
         get_elevation=40,
