@@ -25,7 +25,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("⚡ Nationwide EV Grid Command & Kinetic Reach Simulator (Comprehensive EIA-930 Engine)")
+st.title("⚡ Nationwide EV Grid Command & Kinetic Reach Simulator (Dual-Mode Engine)")
 
 # ---------------------------------------------------------
 # Database Connection (Securely via Streamlit Secrets)
@@ -38,32 +38,29 @@ def get_db_connection():
 # Comprehensive National Balancing Authority Footprints (14 Regions)
 # ---------------------------------------------------------
 ISO_FOOTPRINTS = {
-    "PJM": {"name": "PJM Interconnection (Mid-Atlantic / East)", "code": "PJM", "box": box(-85.5, 36.0, -74.0, 43.0)},
-    "MISO": {"name": "MISO (Midwest ISO)", "code": "MISO", "box": box(-105.0, 28.0, -84.0, 49.0)},
-    "CISO": {"name": "CAISO (California ISO)", "code": "CISO", "box": box(-124.5, 32.5, -114.0, 42.0)},
-    "ERCOT": {"name": "ERCOT (Texas Reliability Entity)", "code": "ERCO", "box": box(-106.6, 25.8, -93.5, 36.5)},
-    "SPP": {"name": "SPP (Southwest Power Pool)", "code": "SWPP", "box": box(-106.0, 33.0, -94.0, 49.0)},
-    "NYISO": {"name": "NYISO (New York ISO)", "code": "NYIS", "box": box(-79.8, 40.5, -71.8, 45.0)},
-    "ISNE": {"name": "ISO-NE (New England ISO)", "code": "ISNE", "box": box(-73.5, 41.0, -66.9, 47.5)},
-    "NW_BPAT": {"name": "Northwest - BPA (WA / OR / ID)", "code": "BPAT", "box": box(-125.0, 41.9, -110.0, 49.0)},
-    "NW_NWMT": {"name": "Northwest - NorthWestern Energy (Montana)", "code": "NWMT", "box": box(-116.0, 44.3, -104.0, 49.0)},
-    "SW_AZPS": {"name": "Southwest - APS (Arizona / New Mexico)", "code": "AZPS", "box": box(-115.0, 31.3, -103.0, 37.0)},
-    "SE_SOCO": {"name": "Southeast - Southern Company", "code": "SOCO", "box": box(-88.5, 30.0, -80.0, 36.5)},
-    "CAR_DUK": {"name": "Carolinas - Duke Energy", "code": "DUK", "box": box(-84.0, 32.0, -75.0, 37.0)},
-    "FLA_FPL": {"name": "Florida - FPL / FPC", "code": "FPL", "box": box(-87.6, 24.5, -79.8, 31.0)},
-    "TVA": {"name": "Tennessee Valley Authority (TVA)", "code": "TVA", "box": box(-90.3, 34.8, -81.9, 36.7)}
+    "PJM": {"name": "PJM Interconnection (Mid-Atlantic / East)", "code": "PJM", "bounds": (-85.5, 36.0, -74.0, 43.0), "center": (40.0, -79.5)},
+    "MISO": {"name": "MISO (Midwest ISO)", "code": "MISO", "bounds": (-105.0, 28.0, -84.0, 49.0), "center": (41.5, -89.5)},
+    "CISO": {"name": "CAISO (California ISO)", "code": "CISO", "bounds": (-124.5, 32.5, -114.0, 42.0), "center": (37.2, -119.5)},
+    "ERCOT": {"name": "ERCOT (Texas Reliability Entity)", "code": "ERCO", "bounds": (-106.6, 25.8, -93.5, 36.5), "center": (31.5, -99.3)},
+    "SPP": {"name": "SPP (Southwest Power Pool)", "code": "SWPP", "bounds": (-106.0, 33.0, -94.0, 49.0), "center": (38.5, -98.0)},
+    "NYISO": {"name": "NYISO (New York ISO)", "code": "NYIS", "bounds": (-79.8, 40.5, -71.8, 45.0), "center": (43.0, -75.5)},
+    "ISNE": {"name": "ISO-NE (New England ISO)", "code": "ISNE", "bounds": (-73.5, 41.0, -66.9, 47.5), "center": (42.3, -71.5)},
+    "NW_BPAT": {"name": "Northwest - BPA (WA / OR / ID)", "code": "BPAT", "bounds": (-125.0, 41.9, -110.0, 49.0), "center": (45.5, -120.5)},
+    "NW_NWMT": {"name": "Northwest - NorthWestern Energy (Montana)", "code": "NWMT", "bounds": (-116.0, 44.3, -104.0, 49.0), "center": (47.0, -110.0)},
+    "SW_AZPS": {"name": "Southwest - APS (Arizona / New Mexico)", "code": "AZPS", "bounds": (-115.0, 31.3, -103.0, 37.0), "center": (34.2, -111.5)},
+    "SE_SOCO": {"name": "Southeast - Southern Company", "code": "SOCO", "bounds": (-88.5, 30.0, -80.0, 36.5), "center": (33.2, -85.0)},
+    "CAR_DUK": {"name": "Carolinas - Duke Energy", "code": "DUK", "bounds": (-84.0, 32.0, -75.0, 37.0), "center": (35.2, -80.5)},
+    "FLA_FPL": {"name": "Florida - FPL / FPC", "code": "FPL", "bounds": (-87.6, 24.5, -79.8, 31.0), "center": (27.8, -81.5)},
+    "TVA": {"name": "Tennessee Valley Authority (TVA)", "code": "TVA", "bounds": (-90.3, 34.8, -81.9, 36.7), "center": (35.8, -86.3)}
 }
 
 def get_all_intersecting_isos(polygon):
-    """
-    Evaluates a drawn polygon against all 14 major U.S. grid footprints 
-    to return every balancing authority jurisdiction affecting the area.
-    """
     affected = []
+    for key, data in ISO_FOOTPRINTS.items();  # Wait, let's keep it clean
     for key, data in ISO_FOOTPRINTS.items():
-        if polygon.intersects(data["box"]):
+        poly_box = box(*data["bounds"])
+        if polygon.intersects(poly_box):
             affected.append((data["code"], data["name"]))
-    
     if not affected:
         return [("MISO", "MISO (Midwest ISO)")]
     return affected
@@ -72,12 +69,36 @@ def get_all_intersecting_isos(polygon):
 # Sidebar Spatial & Visual Controls
 # ---------------------------------------------------------
 st.sidebar.header("🎯 Spatial Boundary Tool")
-st.sidebar.markdown("Draw a polygon or rectangle anywhere in the U.S. The national engine automatically detects all overlapping ISO/BA jurisdictions.")
+input_mode = st.sidebar.radio(
+    "Selection Mode",
+    ["Select Region / ISO (Instant Scope)", "Draw Custom Boundary (Manual Seam)"]
+)
 
-if st.sidebar.button("🔄 Reset / Clear Drawn Boundary", use_container_width=True):
-    for key in list(st.session_state.keys()):
-        del st.session_state[key]
-    st.rerun()
+active_polygon = None
+map_center = [39.8283, -98.5795]
+map_zoom = 4
+
+if input_mode == "Select Region / ISO (Instant Scope)":
+    selected_iso_key = st.sidebar.selectbox(
+        "Select Regional Grid / ISO",
+        list(ISO_FOOTPRINTS.keys()),
+        format_func=lambda x: ISO_FOOTPRINTS[x]["name"]
+    )
+    iso_info = ISO_FOOTPRINTS[selected_iso_key]
+    active_polygon = box(*iso_info["bounds"])
+    map_center = list(iso_info["center"])
+    map_zoom = 6
+    st.sidebar.success(f"⚡ Scope locked to **{iso_info['name']}**.")
+    
+    if st.sidebar.button("🔄 Reset View", use_container_width=True):
+        st.rer()
+
+else:
+    st.sidebar.markdown("Draw a polygon or rectangle anywhere in the U.S. on the interactive map below.")
+    if st.sidebar.button("🔄 Reset / Clear Drawn Boundary", use_container_width=True):
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
+        st.rerun()
 
 st.sidebar.markdown("---")
 st.sidebar.header("📊 Infrastructure Layer Focus")
@@ -106,15 +127,21 @@ j40_filter = st.sidebar.checkbox("Isolate Justice40 DAC Sites", value=False, hel
 with st.sidebar.expander("🧠 Methodology & Critical Context", expanded=True):
     st.markdown("""
     **The Visual Metaphor: Pillars vs. Glowing Pads**
-    *   **Neon Green Glowing Pads:** Represent existing active DC Fast-Charging hubs queried live from federal databases. Rendered flat because they have a grid deficit of zero—they are the physical anchors of the network.
-    *   **Extruded 3D Pillars:** Represent candidate brownfield gas station retrofits. Their height and color visualize intervention value and Make-Ready capital requirements.
+    *   **Neon Green Glowing Pads:** Represent existing active DC Fast-Charging hubs. They are rendered flat because they have a grid deficit of zero—they are the physical anchors of the current network.
+    *   **Extruded 3D Pillars:** Represent existing gas stations, acting as our candidate conversion sites. Why gas stations? They are the ultimate “brownfield” targets for EV infrastructure. They already possess the exact physical footprint required: paved pull-through lanes, heavy-duty canopies, high-visibility lighting, and retail amenities (bathrooms, food) crucial for drivers waiting 20-30 minutes for a charge. The pillar’s height visualizes the systemic value of ripping out a gas pump and replacing it with a DCFC node at that location.
 
-    **Why a 2.0-Mile Threshold?**
-    In dense metro corridors, a 2-mile spatial gap is a structural barrier for multi-unit dwelling (MUD) residents who cannot charge at home, destroying the EV value proposition if exceeded.
+    **Why a 2.0 Mile Threshold?**
+    In urban topologies, a 2-mile spatial gap is a structural barrier. For the 30%+ of residents in multi-unit dwellings (MUDs) who cannot charge at home, driving over 2 miles exclusively to “fuel up” destroys the EV value proposition. Federal NEVI guidelines prioritize 1-mile buffers from corridors; breaching 2 miles in a metro footprint indicates a stark, unserved “EV Desert.”
+
+    **Grid Thermal Limits Explained:**
+    “Thermal Capacity” refers to the physical heat limit of local distribution wires. A standard 4-port 150kW DCFC station demands 600kW of instantaneous power. Forcing that load through an older commercial feeder without upgrades causes the lines to overheat and melt, blowing local transformers. “Magenta” sites require expensive utility Make-Ready Upgrades before chargers can be installed.
+
+    **Justice40 Integration:**
+    The Justice40 Initiative mandates that 40% of federal clean energy investments flow to Disadvantaged Communities (DACs). Filtering by Justice40 isolates sites that are eligible for prioritized federal grants, merging grid equity with grid expansion. *(Note: DAC status here is modeled deterministically for demonstration).*
 
     **National Grid Oversight Architecture:**
-    *   **Full Lower 48 Coverage:** Encompasses all 14 EIA-930 operating regions, including Pacific Northwest (BPA/WA/OR), Montana, Southwest, Southeast, Carolinas, Florida, and Tennessee.
-    *   **Multi-Jurisdictional Seam Analysis:** Automatically identifies overlapping regional footprints and balancing authorities across state borders for complete regulatory transparency.
+    *   **Full Lower 48 Coverage:** Encompasses all 14 EIA-930 operating regions.
+    *   **Multi-Jurisdictional Seam Analysis:** Automatically identifies overlapping regional footprints across state borders for complete regulatory transparency.
     """)
 
 st.sidebar.markdown("---")
@@ -124,9 +151,9 @@ camera_pitch = st.sidebar.slider("Camera Pitch", min_value=30, max_value=60, val
 camera_bearing = st.sidebar.slider("Camera Rotation", min_value=-180, max_value=180, value=-22, step=2)
 
 # ---------------------------------------------------------
-# Interactive Folium Map
+# Interactive Folium Map (Rendered if Manual Draw Mode is Active)
 # ---------------------------------------------------------
-m = folium.Map(location=[39.8283, -98.5795], zoom_start=4, tiles="CartoDB dark_matter")
+m = folium.Map(location=map_center, zoom_start=map_zoom, tiles="CartoDB dark_matter")
 Draw(
     export=False,
     draw_options={
@@ -141,19 +168,21 @@ Draw(
 
 map_container = st.container()
 with map_container:
-    draw_output = st_folium(m, width="100%", height=400, key="interactive_map")
-
-active_polygon = None
-if draw_output and draw_output.get("last_active_drawing"):
-    geom_dict = draw_output["last_active_drawing"]["geometry"]
-    active_polygon = shape(geom_dict)
+    if input_mode == "Draw Custom Boundary (Manual Seam)":
+        draw_output = st_folium(m, width="100%", height=400, key="interactive_map")
+        if draw_output and draw_output.get("last_active_drawing"):
+            geom_dict = draw_output["last_active_drawing"]["geometry"]
+            active_polygon = shape(geom_dict)
+    else:
+        # Display static interactive preview for pre-scoped regional selection
+        st_folium(m, width="100%", height=400, key="static_iso_map")
 
 if not active_polygon:
-    st.info("👆 Draw a polygon or rectangle anywhere on the U.S. map above. The system will automatically detect all intersecting ISO and Balancing Authority jurisdictions.")
+    st.info("👆 Select a regional ISO from the sidebar or draw a custom boundary on the map above to query PostGIS.")
     st.stop()
 
 # ---------------------------------------------------------
-# Detect All Intersecting ISOs / BAs for the Drawn Boundary
+# Detect All Intersecting ISOs / BAs for the Active Polygon
 # ---------------------------------------------------------
 intersecting_isos = get_all_intersecting_isos(active_polygon)
 primary_iso_code, primary_iso_label = intersecting_isos[0]
@@ -164,7 +193,7 @@ for code, label in intersecting_isos:
     st.sidebar.markdown(f"<span class='iso-badge'>{label} (`{code}`)</span>", unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# Live EIA-930 API Integration (Primary Governing Authority)
+# Live EIA-930 API Integration
 # ---------------------------------------------------------
 @st.cache_data(ttl=3600)
 def fetch_real_time_grid_load(respondent):
@@ -263,6 +292,14 @@ with st.spinner("Querying national PostGIS spatial engine and transmission layer
         df = pd.read_sql(candidates_query, conn, params=(polygon_str,))
         chargers_df = pd.read_sql(chargers_query, conn, params=(polygon_str,))
         
+        if not df.empty:
+            target_chargers = df[['nearest_charger', 'target_lon', 'target_lat']].drop_duplicates(subset=['target_lon', 'target_lat']).copy()
+            target_chargers['station_name'] = target_chargers['nearest_charger']
+            target_chargers['ports'] = 4
+            target_chargers['lon'] = target_chargers['target_lon']
+            target_chargers['lat'] = target_chargers['target_lat']
+            chargers_df = pd.concat([chargers_df, target_chargers]).drop_duplicates(subset=['lon', 'lat'])
+
         trans_df = pd.DataFrame()
         if show_transmission:
             cur = conn.cursor()
@@ -296,7 +333,7 @@ with st.spinner("Querying national PostGIS spatial engine and transmission layer
         df, chargers_df, trans_df = pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
 if df.empty and chargers_df.empty:
-    st.warning("No sites found within the drawn boundary. Try drawing a larger box over any major U.S. metropolitan area.")
+    st.warning("No sites found within the active boundary. Try selecting a different ISO or expanding your custom drawing.")
     st.stop()
 
 # Enrich candidate data if present
@@ -462,6 +499,7 @@ if show_candidates and not df.empty:
 if show_chargers and not chargers_df.empty:
     layer_hub_halo = pdk.Layer(
         "ScatterplotLayer",
+        id="charger_halo",
         data=chargers_df,
         get_position=["lon", "lat"],
         get_fill_color="color_halo",
@@ -484,7 +522,7 @@ if show_chargers and not chargers_df.empty:
     layers.extend([layer_hub_halo, layer_hub_core])
 
 centroid = active_polygon.centroid
-view_state = pdk.ViewState(latitude=centroid.y, longitude=centroid.x, zoom=11, pitch=camera_pitch, bearing=camera_bearing)
+view_state = pdk.ViewState(latitude=centroid.y, longitude=centroid.x, zoom=10 if input_mode == "Select Region / ISO (Instant Scope)" else 11, pitch=camera_pitch, bearing=camera_bearing)
 
 tooltip_html = (
     "<div style='font-family: Consolas, monospace; padding: 10px; font-size: 11px; background: rgba(13, 17, 23, 0.95); border: 1px solid #30363d; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); max-width: 250px; white-space: normal; word-wrap: break-word;'>"
