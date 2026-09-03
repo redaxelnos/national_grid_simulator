@@ -121,7 +121,7 @@ j40_filter = st.sidebar.checkbox("Isolate Justice40 DAC Sites", value=False, hel
 with st.sidebar.expander("🧠 Methodology & Critical Context", expanded=False):
     st.markdown("""
     **Nationwide Spatial Capabilities:**
-    *   **Any State / Any Corridor:** By dropping a bounding box over any metropolitan area in the U.S. (e.g., Los Angeles, Houston, Chicago, Atlanta), PostGIS performs lightning-fast spatial indexing across national records.
+    *   **Any State / Any Corridor:** By dropping a bounding box over any metropolitan area in the U.S., PostGIS performs lightning-fast spatial indexing across national records.
     *   **Live Federal Telemetry:** Select your regional Balancing Authority from the dropdown above to pull real-time operating data straight from the EIA-930 feed.
     """)
 
@@ -338,7 +338,7 @@ st.info(kinetic_reach_explanation + "\n\n**Active Filter Telemetry Actions:**\n"
 st.markdown("---")
 
 # ---------------------------------------------------------
-# PyDeck 3D Visualization Layer
+# PyDeck 3D Visualization Layer (With Explicit IDs)
 # ---------------------------------------------------------
 layers = []
 
@@ -348,6 +348,7 @@ show_chargers = layer_focus in ["Comparative (Both Layers)", "Existing EV Chargi
 if show_arcs and show_candidates and not df.empty:
     layer_arcs = pdk.Layer(
         "ArcLayer",
+        id="kinetic_arcs",  # ID required for selection state
         data=df,
         get_source_position=["source_lon", "source_lat"],
         get_target_position=["target_lon", "target_lat"],
@@ -362,6 +363,7 @@ if show_arcs and show_candidates and not df.empty:
 if show_candidates and not df.empty:
     layer_candidates_3d = pdk.Layer(
         "ColumnLayer",
+        id="candidate_sites",  # ID required for selection state
         data=df,
         get_position=["source_lon", "source_lat"],
         get_elevation="elevation",
@@ -377,6 +379,7 @@ if show_candidates and not df.empty:
 if show_chargers and not chargers_df.empty:
     layer_hub_halo = pdk.Layer(
         "ScatterplotLayer",
+        id="charger_halo",
         data=chargers_df,
         get_position=["lon", "lat"],
         get_fill_color="color_halo",
@@ -385,6 +388,7 @@ if show_chargers and not chargers_df.empty:
     )
     layer_hub_core = pdk.Layer(
         "ColumnLayer",
+        id="charger_core",  # ID required for selection state
         data=chargers_df,
         get_position=["lon", "lat"],
         get_elevation=40,
@@ -424,7 +428,15 @@ r = pdk.Deck(
     tooltip={"html": tooltip_html, "style": {"color": "white"}}
 )
 
-map_selection = st.pydeck_chart(r, width="stretch", height=600, on_select="rerun", selection_mode="single-object")
+# Added key="national_map" so Streamlit tracks selection state across reruns
+map_selection = st.pydeck_chart(
+    r, 
+    width="stretch", 
+    height=600, 
+    on_select="rerun", 
+    selection_mode="single-object",
+    key="national_map"
+)
 
 # ---------------------------------------------------------
 # Dynamic Bottom Drawer: Site Due Diligence Dossier
