@@ -3,7 +3,7 @@ import pydeck as pdk
 import folium
 from folium.plugins import Draw
 from streamlit_folium import st_folium
-from shapely.geometry import shape, box
+from shapely.geometry import shape, box, Point
 import pandas as pd
 import psycopg2
 import json
@@ -25,7 +25,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("⚡ Nationwide EV Grid Command & Kinetic Reach Simulator (Dynamic Unlimited PostGIS Engine)")
+st.title("⚡ Nationwide EV Grid Command & Kinetic Reach Simulator (Precise Coordinate Engine)")
 
 # ---------------------------------------------------------
 # Database Connection (Securely via Streamlit Secrets)
@@ -54,15 +54,19 @@ ISO_FOOTPRINTS = {
     "TVA": {"name": "Tennessee Valley Authority (TVA)", "code": "TVA", "bounds": (-90.3, 34.8, -81.9, 36.7), "center": (35.8, -86.3)}
 }
 
-def get_all_intersecting_isos(polygon):
-    affected = []
+def get_iso_for_point(lon, lat):
+    """
+    Evaluates exact geographic coordinates (lon, lat) to return 
+    only the specific Balancing Authority governing that precise location.
+    """
+    governing = []
     for key, data in ISO_FOOTPRINTS.items():
-        poly_box = box(*data["bounds"])
-        if polygon.intersects(poly_box):
-            affected.append((data["code"], data["name"]))
-    if not affected:
+        minx, miny, maxx, maxy = data["bounds"]
+        if minx <= lon <= maxx and miny <= lat <= maxy:
+            governing.append((data["code"], data["name"]))
+    if not governing:
         return [("MISO", "MISO (Midwest ISO)")]
-    return affected
+    return governing
 
 # ---------------------------------------------------------
 # Sidebar Spatial & Visual Controls
@@ -74,6 +78,7 @@ input_mode = st.sidebar.radio(
 )
 
 active_polygon = None
+selected_iso_info = None
 map_center = [39.8283, -98.5795]
 map_zoom = 4
 
@@ -83,11 +88,11 @@ if input_mode == "Select Region / ISO (Instant Scope)":
         list(ISO_FOOTPRINTS.keys()),
         format_func=lambda x: ISO_FOOTPRINTS[x]["name"]
     )
-    iso_info = ISO_FOOTPRINTS[selected_iso_key]
-    active_polygon = box(*iso_info["bounds"])
-    map_center = list(iso_info["center"])
+    selected_iso_info = ISO_FOOTPRINTS[selected_iso_key]
+    active_polygon = box(*selected_iso_info["bounds"])
+    map_center = list(selected_iso_info["center"])
     map_zoom = 6
-    st.sidebar.success(f"⚡ Scope locked to **{iso_info['name']}**.")
+    st.sidebar.success(f"⚡ Scope locked to **{selected_iso_info['name']}**.")
 else:
     st.sidebar.markdown("Draw a polygon or rectangle anywhere in the U.S. on the interactive map below.")
     if st.sidebar.button("🔄 Reset / Clear Drawn Boundary", use_container_width=True):
@@ -136,7 +141,7 @@ with st.sidebar.expander("🧠 Methodology & Critical Context", expanded=True):
 
     **National Grid Oversight Architecture:**
     *   **Full Lower 48 Coverage:** Encompasses all 14 EIA-930 operating regions with fully dynamic, un-capped spatial queries.
-    *   **Multi-Jurisdictional Seam Analysis:** Automatically identifies overlapping regional footprints across state borders for complete regulatory transparency.
+    *   **Precise Coordinate Resolution:** Automatically identifies the exact governing balancing authority for each individual site based on latitude and longitude.
     """)
 
 st.sidebar.markdown("---")
@@ -176,14 +181,20 @@ if not active_polygon:
     st.stop()
 
 # ---------------------------------------------------------
-# Detect All Intersecting ISOs / BAs for the Active Polygon
+# Governing Jurisdiction Resolution
 # ---------------------------------------------------------
-intersecting_isos = get_all_intersecting_isos(active_polygon)
-primary_iso_code, primary_iso_label = intersecting_isos[0]
+if input_mode == "Select Region / ISO (Instant Scope)" and selected_iso_info:
+    region_governing_isos = [(selected_iso_info["code"], selected_iso_info["name"])]
+else:
+    # For custom drawn polygons, check centroid coordinates
+    centroid = active_polygon.centroid
+    region_governing_isos = get_iso_for_point(centroid.x, centroid.y)
+
+primary_iso_code, primary_iso_label = region_governing_isos[0]
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("⚡ **Governing Jurisdictions:**")
-for code, label in intersecting_isos:
+st.sidebar.markdown("⚡ **Governing Jurisdiction:**")
+for code, label in region_governing_isos:
     st.sidebar.markdown(f"<span class='iso-badge'>{label} (`{code}`)</span>", unsafe_allow_html=True)
 
 # ---------------------------------------------------------
@@ -216,7 +227,7 @@ def fetch_real_time_grid_load(respondent):
 live_region_load = fetch_real_time_grid_load(primary_iso_code)
 
 # ---------------------------------------------------------
-# Direct PostGIS Spatial Queries (Completely Unlimited & Dynamic)
+# Direct PostGIS Spatial Queries (Unlimited & Dynamic)
 # ---------------------------------------------------------
 polygon_str = json.dumps(active_polygon.__geo_interface__)
 
@@ -403,8 +414,8 @@ col4.metric(
 st.markdown("---")
 st.markdown("### 📡 Dynamic Telemetry & Kinetic Reach Briefing")
 
-iso_names_str = ", ".join([label for _, label in intersecting_isos])
-filter_actions = [f"• **Governing Jurisdictions:** {iso_names_str}"]
+iso_names_str = ", ".join([label for _, label in region_governing_isos])
+filter_actions = [f"• **Governing Jurisdiction:** {iso_names_str}"]
 
 if layer_focus == "Comparative (Both Layers)":
     filter_actions.append("• **Infrastructure Layer:** Dual-layer overlay active, rendering candidate gas station retrofits alongside existing active EV charging anchor hubs.")
@@ -523,7 +534,7 @@ tooltip_html = (
     "<span style='color: #8b949e;'>Transmission Gap:</span> {trans_dist_miles} miles<br/>"
     "<hr style='margin: 6px 0; border: 0; border-top: 1px solid #30363d;'/>"
     "<b style='color: #c9d1d9;'>Federal Grid Telemetry:</b><br/>"
-    "<span style='color: #8b949e;'>Governing Jurisdictions:</span> <b>" + iso_names_str + "</b><br/>"
+    "<span style='color: #8b949e;'>Governing Jurisdiction:</span> <b>" + iso_names_str + "</b><br/>"
     "<span style='color: #8b949e;'>Live Load (" + primary_iso_code + "):</span> <b>" + str(live_region_load) + "%</b><br/>"
     "<hr style='margin: 6px 0; border: 0; border-top: 1px solid #30363d;'/>"
     "<b style='color: #c9d1d9;'>Executive Insight:</b><br/>"
@@ -559,6 +570,13 @@ if map_selection and getattr(map_selection, "selection", None):
         site_type = "charger"
 
 if selected_site:
+    # Resolve precise governing ISO for this exact clicked site using its coordinates
+    site_lon = selected_site.get('source_lon', selected_site.get('lon', 0))
+    site_lat = selected_site.get('source_lat', selected_site.get('lat', 0))
+    site_isos = get_iso_for_point(site_lon, site_lat)
+    site_iso_str = ", ".join([label for _, label in site_isos])
+    site_primary_code = site_isos[0][0]
+
     col_a, col_b, col_c = st.columns(3)
     
     with col_a:
@@ -566,20 +584,20 @@ if selected_site:
         if site_type == "candidate":
             st.markdown(f"**Classification:** {selected_site.get('status', 'N/A')}")
             st.markdown(f"**Justice40 DAC Status:** `{selected_site.get('j40_status', 'No')}`")
-            st.markdown(f"**Coordinates:** `{selected_site.get('source_lat', 0):.5f}, {selected_site.get('source_lon', 0):.5f}`")
+            st.markdown(f"**Coordinates:** `{site_lat:.5f}, {site_lon:.5f}`")
             st.markdown(f"**Distance to Nearest DCFC:** `{selected_site.get('dist_miles', 'N/A')} miles`")
             st.markdown(f"**Transmission Corridor Gap:** `{selected_site.get('trans_dist_miles', 'N/A')} miles [PostGIS]`")
         else:
             st.markdown(f"**Classification:** Active Live DCFC Anchor Hub")
             st.markdown(f"**Operating Network:** `{selected_site.get('ev_network', 'Unknown')}`")
-            st.markdown(f"**Coordinates:** `{selected_site.get('lat', 0):.5f}, {selected_site.get('lon', 0):.5f}`")
+            st.markdown(f"**Coordinates:** `{site_lat:.5f}, {site_lon:.5f}`")
             st.markdown(f"**Active Fast Charging Ports:** `{selected_site.get('ports', 'Unknown')}`")
             
     with col_b:
         if site_type == "candidate":
-            st.markdown("#### ⚡ Multi-ISO Grid Oversight")
-            st.markdown(f"**Governing Jurisdictions:** `{iso_names_str}`")
-            st.markdown(f"**Primary EIA-930 Load ({primary_iso_code}):** `{live_region_load}%`")
+            st.markdown("#### ⚡ Local Grid Oversight")
+            st.markdown(f"**Governing Jurisdiction:** `{site_iso_str}`")
+            st.markdown(f"**Primary EIA-930 Load ({site_primary_code}):** `{live_region_load}%`")
             st.markdown(f"**Composite Stress Score:** `{selected_site.get('real_grid_stress', 0.0)} / 150`")
             st.markdown(f"• **Transmission Proximity:** `~{selected_site.get('trans_dist_miles', 0.0)} miles away`")
             
@@ -593,7 +611,7 @@ if selected_site:
         else:
             st.markdown("#### ⚡ Operating Grid Anchor Telemetry")
             st.success("Active Load Verified: Fully operational DC Fast Charging hub.")
-            st.markdown(f"**Governing Jurisdictions:** `{iso_names_str}`")
+            st.markdown(f"**Governing Jurisdiction:** `{site_iso_str}`")
             st.markdown("**Grid Deficit:** `0.00 miles` (System Baseline Node)")
             
     with col_c:
