@@ -24,7 +24,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("⚡ Nationwide EV Grid Command & Kinetic Reach Simulator")
+st.title("⚡ Nationwide EV Grid Command & Kinetic Reach Simulator (Auto-RTO Routing)")
 
 # ---------------------------------------------------------
 # Database Connection (Securely via Streamlit Secrets)
@@ -34,64 +34,32 @@ def get_db_connection():
     return psycopg2.connect(st.secrets["DATABASE_URL"])
 
 # ---------------------------------------------------------
-# Sidebar Controls & National Balancing Authority Selector
+# Automated Geographic ISO/Balancing Authority Routing Engine
 # ---------------------------------------------------------
-st.sidebar.header("⚡ National Grid Telemetry")
-ba_options = {
-    "PJM Interconnection (Mid-Atlantic / East)": "PJM",
-    "MISO (Midwest ISO)": "MISO",
-    "CAISO (California ISO)": "CISO",
-    "ERCOT (Texas Reliability Entity)": "ERCOT",
-    "SPP (Southwest Power Pool)": "SPP",
-    "NYISO (New York ISO)": "NYISO",
-    "ISO-NE (New England ISO)": "ISNE"
-}
-selected_ba_label = st.sidebar.selectbox("EIA-930 Balancing Authority", list(ba_options.keys()))
-selected_respondent = ba_options[selected_ba_label]
-
-# ---------------------------------------------------------
-# Live EIA-930 API Integration (Dynamic U.S. Balancing Authorities)
-# ---------------------------------------------------------
-@st.cache_data(ttl=3600)
-def fetch_real_time_grid_load(respondent):
+def auto_detect_balancing_authority(lon, lat):
     """
-    Pulls live hourly electric grid monitor data (EIA-930) for any selected U.S. Balancing Authority.
-    Compares real-time actual demand vs. forecasted demand to calculate regional grid strain[cite: 1, 2].
+    Automatically maps spatial coordinates to the appropriate U.S. 
+    Balancing Authority (EIA-930 respondent code) based on regional grid boundaries.
     """
-    try:
-        eia_key = st.secrets["EIA_API_KEY"]
-        eia_url = (
-            f"https://api.eia.gov/v2/electricity/rto/region-data/data/"
-            f"?api_key={eia_key}&facets[respondent][][]={respondent}&frequency=hourly"
-            f"&data[0]=value&sort[0][column]=period&sort[0][direction]=desc&length=2"
-        )
-        
-        response = requests.get(eia_url, timeout=10)
-        data = response.json()
-        
-        records = data.get("response", {}).get("data", [])
-        if not records:
-            return 85.0  # Fallback regional baseline if API is down
-            
-        actual_demand = next((r['value'] for r in records if r['type'] == 'D'), None)
-        forecast_demand = next((r['value'] for r in records if r['type'] == 'DF'), None)
-        
-        if actual_demand and forecast_demand:
-            regional_strain = (actual_demand / forecast_demand) * 100
-            return round(regional_strain, 1)
-        return 85.0
-        
-    except Exception as e:
-        return 85.0
-
-live_region_load = fetch_real_time_grid_load(selected_respondent)
+    if -106.6 <= lon <= -93.5 and 25.8 <= lat <= 36.5:
+        return "ERCOT", "ERCOT (Texas Reliability Entity)"
+    elif lon < -114.0 or (-124.4 <= lon <= -114.0 and 32.5 <= lat <= 42.0):
+        return "CISO", "CAISO (California ISO)"
+    elif -79.8 <= lon <= -71.8 and 40.5 <= lat <= 45.0:
+        return "NYISO", "NYISO (New York ISO)"
+    elif -73.5 <= lon <= -66.9 and 41.0 <= lat <= 47.5:
+        return "ISNE", "ISO-NE (New England ISO)"
+    elif -84.8 <= lon <= -74.0 and 36.5 <= lat <= 42.5:
+        return "PJM", "PJM Interconnection (Mid-Atlantic / East)"
+    elif -106.0 <= lon < -94.0 and 33.0 <= lat <= 49.0:
+        return "SPP", "SPP (Southwest Power Pool)"
+    return "MISO", "MISO (Midwest ISO)"
 
 # ---------------------------------------------------------
 # Sidebar Spatial & Visual Controls
 # ---------------------------------------------------------
-st.sidebar.markdown("---")
 st.sidebar.header("🎯 Spatial Boundary Tool")
-st.sidebar.markdown("Draw a polygon or rectangle anywhere in the U.S. PostGIS will instantly query nationwide transmission lines, gas stations, and EV chargers.")
+st.sidebar.markdown("Draw a polygon or rectangle anywhere in the U.S. The engine will **automatically detect** the regional Balancing Authority and query PostGIS.")
 
 if st.sidebar.button("🔄 Reset / Clear Drawn Boundary", use_container_width=True):
     for key in list(st.session_state.keys()):
@@ -107,6 +75,10 @@ layer_focus = st.sidebar.radio(
 )
 
 st.sidebar.markdown("---")
+st.sidebar.header("🗺️ GIS Overlays")
+show_transmission = st.sidebar.checkbox("Render High-Voltage Transmission Lines", value=True, help="Query and render real transmission corridors from PostGIS within the active boundary.")
+
+st.sidebar.markdown("---")
 st.sidebar.header("🕹️ Visual Engine Modes")
 visual_mode = st.sidebar.radio(
     "3D Telemetry Mapping Mode",
@@ -120,9 +92,9 @@ j40_filter = st.sidebar.checkbox("Isolate Justice40 DAC Sites", value=False, hel
 
 with st.sidebar.expander("🧠 Methodology & Critical Context", expanded=False):
     st.markdown("""
-    **Nationwide Spatial Capabilities:**
-    *   **Any State / Any Corridor:** By dropping a bounding box over any metropolitan area in the U.S., PostGIS performs lightning-fast spatial indexing across national records.
-    *   **Live Federal Telemetry:** Select your regional Balancing Authority from the dropdown above to pull real-time operating data straight from the EIA-930 feed.
+    **Automated Telemetry Architecture:**
+    *   **Spatial Centroid Routing:** Extracts polygon centroid coordinates to automatically route to the governing RTO/ISO.
+    *   **PostGIS Path Layer:** High-voltage transmission lines are queried directly within your bounding box and rendered as 3D paths color-coded by line voltage.
     """)
 
 st.sidebar.markdown("---")
@@ -155,11 +127,49 @@ if draw_output and draw_output.get("last_active_drawing"):
     active_polygon = shape(geom_dict)
 
 if not active_polygon:
-    st.info("👆 Draw a polygon or rectangle anywhere on the U.S. map above to query your national PostGIS database.")
+    st.info("👆 Draw a polygon or rectangle anywhere on the U.S. map above. The system will automatically detect the ISO and query PostGIS.")
     st.stop()
 
 # ---------------------------------------------------------
-# Direct PostGIS Spatial Engine (Nationwide Query)
+# Auto-Detect Respondent from Drawn Polygon Centroid
+# ---------------------------------------------------------
+centroid = active_polygon.centroid
+auto_respondent_code, auto_respondent_label = auto_detect_balancing_authority(centroid.x, centroid.y)
+
+st.sidebar.markdown("---")
+st.sidebar.success(f"⚡ **Auto-Routed ISO:**\n`{auto_respondent_label}`")
+
+# ---------------------------------------------------------
+# Live EIA-930 API Integration
+# ---------------------------------------------------------
+@st.cache_data(ttl=3600)
+def fetch_real_time_grid_load(respondent):
+    try:
+        eia_key = st.secrets["EIA_API_KEY"]
+        eia_url = (
+            f"https://api.eia.gov/v2/electricity/rto/region-data/data/"
+            f"?api_key={eia_key}&facets[respondent][][]={respondent}&frequency=hourly"
+            f"&data[0]=value&sort[0][column]=period&sort[0][direction]=desc&length=2"
+        )
+        response = requests.get(eia_url, timeout=10)
+        data = response.json()
+        records = data.get("response", {}).get("data", [])
+        if not records:
+            return 85.0
+            
+        actual_demand = next((r['value'] for r in records if r['type'] == 'D'), None)
+        forecast_demand = next((r['value'] for r in records if r['type'] == 'DF'), None)
+        
+        if actual_demand and forecast_demand:
+            return round((actual_demand / forecast_demand) * 100, 1)
+        return 85.0
+    except Exception:
+        return 85.0
+
+live_region_load = fetch_real_time_grid_load(auto_respondent_code)
+
+# ---------------------------------------------------------
+# Direct PostGIS Spatial Queries (Candidates, Chargers, Transmission)
 # ---------------------------------------------------------
 polygon_str = json.dumps(active_polygon.__geo_interface__)
 
@@ -168,9 +178,9 @@ WITH input_poly AS (
     SELECT ST_SetSRID(ST_GeomFromGeoJSON(%s), 4326) AS geom
 ),
 regional_candidates AS (
-    SELECT fuel_stations.site_name, fuel_stations.geom AS geom 
+    SELECT fuel_stations.site_name, fuel_stations.geometry AS geom 
     FROM fuel_stations, input_poly
-    WHERE ST_Intersects(fuel_stations.geom, input_poly.geom)
+    WHERE ST_Intersects(fuel_stations.geometry, input_poly.geom)
     LIMIT 2000
 )
 SELECT 
@@ -184,9 +194,9 @@ SELECT
     ST_Distance(c.geom::geography, t.geom::geography) / 1609.34 AS trans_dist_miles
 FROM regional_candidates c
 CROSS JOIN LATERAL (
-    SELECT e_sub.station_name, e_sub.geom AS geom 
+    SELECT e_sub.station_name, e_sub.geometry AS geom 
     FROM ev_chargers e_sub 
-    ORDER BY c.geom <-> e_sub.geom 
+    ORDER BY c.geom <-> e_sub.geometry 
     LIMIT 1
 ) e
 CROSS JOIN LATERAL (
@@ -204,11 +214,23 @@ WITH input_poly AS (
 SELECT 
     ev_chargers.station_name,
     ev_chargers.ports,
-    ST_X(ev_chargers.geom) AS lon,
-    ST_Y(ev_chargers.geom) AS lat
+    ST_X(ev_chargers.geometry) AS lon,
+    ST_Y(ev_chargers.geometry) AS lat
 FROM ev_chargers, input_poly
-WHERE ST_Intersects(ev_chargers.geom, input_poly.geom)
+WHERE ST_Intersects(ev_chargers.geometry, input_poly.geom)
 LIMIT 2000;
+"""
+
+transmission_query = """
+WITH input_poly AS (
+    SELECT ST_SetSRID(ST_GeomFromGeoJSON(%s), 4326) AS geom
+)
+SELECT 
+    COALESCE("VOLTAGE", 0) AS voltage,
+    ST_AsGeoJSON(transmission_lines.geometry) AS geojson
+FROM transmission_lines, input_poly
+WHERE ST_Intersects(transmission_lines.geometry, input_poly.geom)
+LIMIT 1200;
 """
 
 with st.spinner("Querying national PostGIS spatial engine and transmission layers..."):
@@ -216,13 +238,39 @@ with st.spinner("Querying national PostGIS spatial engine and transmission layer
         conn = get_db_connection()
         df = pd.read_sql(candidates_query, conn, params=(polygon_str,))
         chargers_df = pd.read_sql(chargers_query, conn, params=(polygon_str,))
+        
+        # Fetch transmission paths if toggled
+        trans_df = pd.DataFrame()
+        if show_transmission:
+            cur = conn.cursor()
+            cur.execute(transmission_query, (polygon_str,))
+            rows = cur.fetchall()
+            paths = []
+            for row in rows:
+                voltage = row[0]
+                geojson_str = row[1]
+                if geojson_str:
+                    geom_dict = json.loads(geojson_str)
+                    coords = geom_dict.get("coordinates", [])
+                    if geom_dict.get("type") == "LineString":
+                        paths.append({"path": coords, "voltage": voltage})
+                    elif geom_dict.get("type") == "MultiLineString":
+                        for line_coords in coords:
+                            paths.append({"path": line_coords, "voltage": voltage})
+            trans_df = pd.DataFrame(paths)
+            if not trans_df.empty:
+                def get_voltage_color(v):
+                    if v >= 500: return [255, 0, 128, 200]   # High voltage (Magenta)
+                    elif v >= 230: return [255, 140, 0, 200]  # Medium-high (Amber)
+                    else: return [0, 229, 255, 160]          # Standard transmission (Cyan)
+                trans_df["color"] = trans_df["voltage"].apply(get_voltage_color)
     except Exception as e:
         try:
             conn.rollback()
         except Exception:
             pass
         st.error(f"Database Query Error: {e}")
-        df, chargers_df = pd.DataFrame(), pd.DataFrame()
+        df, chargers_df, trans_df = pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
 if df.empty and chargers_df.empty:
     st.warning("No sites found within the drawn boundary. Try drawing a larger box over any major U.S. metropolitan area.")
@@ -319,10 +367,13 @@ elif layer_focus == "Candidate Gas Station Retrofits Only":
 else:
     filter_actions.append("• **Infrastructure Layer:** Isolated to existing active DC Fast Charging anchor hubs to audit current network coverage.")
 
+if show_transmission:
+    filter_actions.append("• **GIS Overlay:** *High-Voltage Transmission Lines* active, rendering regional transmission pathways queried from PostGIS.")
+
 if "Spatial" in visual_mode:
     filter_actions.append("• **Telemetry Mode:** *Spatial Distance (Grid Deficit)* is active. 3D column heights represent physical mileage gaps to the nearest charging hub, flagging commercial 'EV Deserts' (>2.0 mi).")
 else:
-    filter_actions.append(f"• **Telemetry Mode:** *Live Transmission Corridor Stress* is active ({selected_respondent} Load at {live_region_load}% + PostGIS Transmission Proximity). 3D column heights and highlights indicate Make-Ready capital requirements.")
+    filter_actions.append(f"• **Telemetry Mode:** *Live Transmission Corridor Stress* is active ({auto_respondent_label} Load at {live_region_load}% + PostGIS Transmission Proximity). 3D column heights and highlights indicate Make-Ready capital requirements.")
 
 if j40_filter:
     filter_actions.append("• **Equity Filter:** *Justice40 DAC Isolation* is enabled. Candidates are filtered strictly to Disadvantaged Communities eligible for prioritized federal clean energy grants.")
@@ -338,9 +389,24 @@ st.info(kinetic_reach_explanation + "\n\n**Active Filter Telemetry Actions:**\n"
 st.markdown("---")
 
 # ---------------------------------------------------------
-# PyDeck 3D Visualization Layer (With Explicit IDs)
+# PyDeck 3D Visualization Layer (Including Transmission PathLayer)
 # ---------------------------------------------------------
 layers = []
+
+# 1. Transmission Lines PathLayer
+if show_transmission and not trans_df.empty:
+    layer_transmission = pdk.Layer(
+        "PathLayer",
+        id="transmission_lines_layer",
+        data=trans_df,
+        get_path="path",
+        get_color="color",
+        width_scale=2,
+        width_min_pixels=1.5,
+        get_width=3,
+        pickable=True,
+    )
+    layers.append(layer_transmission)
 
 show_candidates = layer_focus in ["Comparative (Both Layers)", "Candidate Gas Station Retrofits Only"]
 show_chargers = layer_focus in ["Comparative (Both Layers)", "Existing EV Charging Hubs Only"]
@@ -348,7 +414,7 @@ show_chargers = layer_focus in ["Comparative (Both Layers)", "Existing EV Chargi
 if show_arcs and show_candidates and not df.empty:
     layer_arcs = pdk.Layer(
         "ArcLayer",
-        id="kinetic_arcs",  # ID required for selection state
+        id="kinetic_arcs",
         data=df,
         get_source_position=["source_lon", "source_lat"],
         get_target_position=["target_lon", "target_lat"],
@@ -363,7 +429,7 @@ if show_arcs and show_candidates and not df.empty:
 if show_candidates and not df.empty:
     layer_candidates_3d = pdk.Layer(
         "ColumnLayer",
-        id="candidate_sites",  # ID required for selection state
+        id="candidate_sites",
         data=df,
         get_position=["source_lon", "source_lat"],
         get_elevation="elevation",
@@ -388,7 +454,7 @@ if show_chargers and not chargers_df.empty:
     )
     layer_hub_core = pdk.Layer(
         "ColumnLayer",
-        id="charger_core",  # ID required for selection state
+        id="charger_core",
         data=chargers_df,
         get_position=["lon", "lat"],
         get_elevation=40,
@@ -401,7 +467,6 @@ if show_chargers and not chargers_df.empty:
     )
     layers.extend([layer_hub_halo, layer_hub_core])
 
-centroid = active_polygon.centroid
 view_state = pdk.ViewState(latitude=centroid.y, longitude=centroid.x, zoom=11, pitch=camera_pitch, bearing=camera_bearing)
 
 tooltip_html = (
@@ -414,7 +479,7 @@ tooltip_html = (
     "<span style='color: #8b949e;'>Transmission Gap:</span> {trans_dist_miles} miles<br/>"
     "<hr style='margin: 6px 0; border: 0; border-top: 1px solid #30363d;'/>"
     "<b style='color: #c9d1d9;'>Federal Grid Telemetry:</b><br/>"
-    "<span style='color: #8b949e;'>Live " + selected_respondent + " Load:</span> <b>" + str(live_region_load) + "%</b><br/>"
+    "<span style='color: #8b949e;'>Live " + auto_respondent_label + " Load:</span> <b>" + str(live_region_load) + "%</b><br/>"
     "<hr style='margin: 6px 0; border: 0; border-top: 1px solid #30363d;'/>"
     "<b style='color: #c9d1d9;'>Executive Insight:</b><br/>"
     "<span style='color: #a5d6ff; line-height: 1.3;'>{insight}</span>"
@@ -428,15 +493,7 @@ r = pdk.Deck(
     tooltip={"html": tooltip_html, "style": {"color": "white"}}
 )
 
-# Added key="national_map" so Streamlit tracks selection state across reruns
-map_selection = st.pydeck_chart(
-    r, 
-    width="stretch", 
-    height=600, 
-    on_select="rerun", 
-    selection_mode="single-object",
-    key="national_map"
-)
+map_selection = st.pydeck_chart(r, width="stretch", height=600, on_select="rerun", selection_mode="single-object", key="national_map")
 
 # ---------------------------------------------------------
 # Dynamic Bottom Drawer: Site Due Diligence Dossier
@@ -476,7 +533,7 @@ if selected_site:
     with col_b:
         if site_type == "candidate":
             st.markdown("#### ⚡ Real-Time Grid Telemetry")
-            st.markdown(f"**Live {selected_respondent} Load (EIA-930):** `{live_region_load}%`")
+            st.markdown(f"**Live {auto_respondent_label} Load (EIA-930):** `{live_region_load}%`")
             st.markdown(f"**Composite Stress Score:** `{selected_site.get('real_grid_stress', 0.0)} / 150`")
             st.markdown(f"• **Transmission Proximity:** `~{selected_site.get('trans_dist_miles', 0.0)} miles away`")
             st.markdown(f"• **Spatial Grid Deficit:** `{selected_site.get('dist_miles', 0.0)} miles to charger`")
@@ -515,9 +572,9 @@ if selected_site:
             
             stress_score = selected_site.get('real_grid_stress', 50.0)
             mr_base = 35000 + (total_mw * 1000 * 110)
-            if stress_score >= 95.0: 
+            if score >= 95.0: 
                 mr_mult = 1.85
-            elif stress_score >= 80.0: 
+            elif score >= 80.0: 
                 mr_mult = 1.35
             else: 
                 mr_mult = 1.0
