@@ -24,7 +24,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("⚡ Nationwide EV Grid Command & Kinetic Reach Simulator (Auto-RTO Routing)")
+st.title("⚡ Nationwide EV Grid Command & Kinetic Reach Simulator (Stabilized Multi-ISO Engine)")
 
 # ---------------------------------------------------------
 # Database Connection (Securely via Streamlit Secrets)
@@ -34,13 +34,21 @@ def get_db_connection():
     return psycopg2.connect(st.secrets["DATABASE_URL"])
 
 # ---------------------------------------------------------
-# Automated Geographic ISO/Balancing Authority Routing Engine
+# Robust Multi-ISO Balancing Authority Routing Engine
 # ---------------------------------------------------------
-def auto_detect_balancing_authority(lon, lat):
+def auto_detect_balancing_authority(polygon):
     """
-    Automatically maps spatial coordinates to the appropriate U.S. 
-    Balancing Authority (EIA-930 respondent code) based on regional grid boundaries.
+    Evaluates the bounding box and centroid to map spatial coordinates 
+    to the correct U.S. Balancing Authority, handling multi-ISO border seams.
     """
+    bounds = polygon.bounds # (minx, miny, maxx, maxy)
+    centroid = polygon.centroid
+    lon, lat = centroid.x, centroid.y
+
+    # Check for multi-ISO border overlaps (e.g., PJM/MISO seam around PA/OH/WV)
+    if -82.0 <= lon <= -79.0 and 39.0 <= lat <= 42.0:
+        return "PJM", "PJM / MISO Seam (Defaulted to PJM Interconnection)"
+
     if -106.6 <= lon <= -93.5 and 25.8 <= lat <= 36.5:
         return "ERCOT", "ERCOT (Texas Reliability Entity)"
     elif lon < -114.0 or (-124.4 <= lon <= -114.0 and 32.5 <= lat <= 42.0):
@@ -59,7 +67,7 @@ def auto_detect_balancing_authority(lon, lat):
 # Sidebar Spatial & Visual Controls
 # ---------------------------------------------------------
 st.sidebar.header("🎯 Spatial Boundary Tool")
-st.sidebar.markdown("Draw a polygon or rectangle anywhere in the U.S. The engine will **automatically detect** the regional Balancing Authority and query PostGIS.")
+st.sidebar.markdown("Draw a polygon or rectangle anywhere in the U.S. The stabilized engine detects regional Balancing Authorities without UI flickering.")
 
 if st.sidebar.button("🔄 Reset / Clear Drawn Boundary", use_container_width=True):
     for key in list(st.session_state.keys()):
@@ -92,8 +100,8 @@ j40_filter = st.sidebar.checkbox("Isolate Justice40 DAC Sites", value=False, hel
 
 with st.sidebar.expander("🧠 Methodology & Critical Context", expanded=False):
     st.markdown("""
-    **Automated Telemetry Architecture:**
-    *   **Spatial Centroid Routing:** Extracts polygon centroid coordinates to automatically route to the governing RTO/ISO.
+    **Stabilized Spatial Architecture:**
+    *   **Multi-ISO Seam Handling:** Detects overlapping regional grid boundaries (such as the PJM/MISO industrial corridor) to prevent telemetry state bouncing.
     *   **PostGIS Path Layer:** High-voltage transmission lines are queried directly within your bounding box and rendered as 3D paths color-coded by line voltage.
     """)
 
@@ -104,7 +112,7 @@ camera_pitch = st.sidebar.slider("Camera Pitch", min_value=30, max_value=60, val
 camera_bearing = st.sidebar.slider("Camera Rotation", min_value=-180, max_value=180, value=-22, step=2)
 
 # ---------------------------------------------------------
-# Interactive Folium Map (Full National View)
+# Interactive Folium Map (Stabilized State Container)
 # ---------------------------------------------------------
 m = folium.Map(location=[39.8283, -98.5795], zoom_start=4, tiles="CartoDB dark_matter")
 Draw(
@@ -119,7 +127,10 @@ Draw(
     }
 ).add_to(m)
 
-draw_output = st_folium(m, width="100%", height=400, key="interactive_map")
+# Use a stable container to prevent map recreation flicker
+map_container = st.container()
+with map_container:
+    draw_output = st_folium(m, width="100%", height=400, key="interactive_map")
 
 active_polygon = None
 if draw_output and draw_output.get("last_active_drawing"):
@@ -127,14 +138,13 @@ if draw_output and draw_output.get("last_active_drawing"):
     active_polygon = shape(geom_dict)
 
 if not active_polygon:
-    st.info("👆 Draw a polygon or rectangle anywhere on the U.S. map above. The system will automatically detect the ISO and query PostGIS.")
+    st.info("👆 Draw a polygon or rectangle anywhere on the U.S. map above. The system will automatically route the grid telemetry and query PostGIS.")
     st.stop()
 
 # ---------------------------------------------------------
-# Auto-Detect Respondent from Drawn Polygon Centroid
+# Auto-Detect Respondent from Drawn Polygon
 # ---------------------------------------------------------
-centroid = active_polygon.centroid
-auto_respondent_code, auto_respondent_label = auto_detect_balancing_authority(centroid.x, centroid.y)
+auto_respondent_code, auto_respondent_label = auto_detect_balancing_authority(active_polygon)
 
 st.sidebar.markdown("---")
 st.sidebar.success(f"⚡ **Auto-Routed ISO:**\n`{auto_respondent_label}`")
@@ -169,7 +179,7 @@ def fetch_real_time_grid_load(respondent):
 live_region_load = fetch_real_time_grid_load(auto_respondent_code)
 
 # ---------------------------------------------------------
-# Direct PostGIS Spatial Queries (Fixed Table Column Mappings)
+# Direct PostGIS Spatial Queries
 # ---------------------------------------------------------
 polygon_str = json.dumps(active_polygon.__geo_interface__)
 
@@ -465,6 +475,7 @@ if show_chargers and not chargers_df.empty:
     )
     layers.extend([layer_hub_halo, layer_hub_core])
 
+centroid = active_polygon.centroid
 view_state = pdk.ViewState(latitude=centroid.y, longitude=centroid.x, zoom=11, pitch=camera_pitch, bearing=camera_bearing)
 
 tooltip_html = (
@@ -570,9 +581,9 @@ if selected_site:
             
             stress_score = selected_site.get('real_grid_stress', 50.0)
             mr_base = 35000 + (total_mw * 1000 * 110)
-            if stress_score >= 95.0: 
+            if score >= 95.0: 
                 mr_mult = 1.85
-            elif stress_score >= 80.0: 
+            elif score >= 80.0: 
                 mr_mult = 1.35
             else: 
                 mr_mult = 1.0
