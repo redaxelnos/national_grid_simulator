@@ -169,7 +169,7 @@ def fetch_real_time_grid_load(respondent):
 live_region_load = fetch_real_time_grid_load(auto_respondent_code)
 
 # ---------------------------------------------------------
-# Direct PostGIS Spatial Queries (Candidates, Chargers, Transmission)
+# Direct PostGIS Spatial Queries (Fixed Table Column Mappings)
 # ---------------------------------------------------------
 polygon_str = json.dumps(active_polygon.__geo_interface__)
 
@@ -178,9 +178,9 @@ WITH input_poly AS (
     SELECT ST_SetSRID(ST_GeomFromGeoJSON(%s), 4326) AS geom
 ),
 regional_candidates AS (
-    SELECT fuel_stations.site_name, fuel_stations.geometry AS geom 
+    SELECT fuel_stations.site_name, fuel_stations.geom AS geom 
     FROM fuel_stations, input_poly
-    WHERE ST_Intersects(fuel_stations.geometry, input_poly.geom)
+    WHERE ST_Intersects(fuel_stations.geom, input_poly.geom)
     LIMIT 2000
 )
 SELECT 
@@ -194,9 +194,9 @@ SELECT
     ST_Distance(c.geom::geography, t.geom::geography) / 1609.34 AS trans_dist_miles
 FROM regional_candidates c
 CROSS JOIN LATERAL (
-    SELECT e_sub.station_name, e_sub.geometry AS geom 
+    SELECT e_sub.station_name, e_sub.geom AS geom 
     FROM ev_chargers e_sub 
-    ORDER BY c.geom <-> e_sub.geometry 
+    ORDER BY c.geom <-> e_sub.geom 
     LIMIT 1
 ) e
 CROSS JOIN LATERAL (
@@ -214,10 +214,10 @@ WITH input_poly AS (
 SELECT 
     ev_chargers.station_name,
     ev_chargers.ports,
-    ST_X(ev_chargers.geometry) AS lon,
-    ST_Y(ev_chargers.geometry) AS lat
+    ST_X(ev_chargers.geom) AS lon,
+    ST_Y(ev_chargers.geom) AS lat
 FROM ev_chargers, input_poly
-WHERE ST_Intersects(ev_chargers.geometry, input_poly.geom)
+WHERE ST_Intersects(ev_chargers.geom, input_poly.geom)
 LIMIT 2000;
 """
 
@@ -239,7 +239,6 @@ with st.spinner("Querying national PostGIS spatial engine and transmission layer
         df = pd.read_sql(candidates_query, conn, params=(polygon_str,))
         chargers_df = pd.read_sql(chargers_query, conn, params=(polygon_str,))
         
-        # Fetch transmission paths if toggled
         trans_df = pd.DataFrame()
         if show_transmission:
             cur = conn.cursor()
@@ -260,9 +259,9 @@ with st.spinner("Querying national PostGIS spatial engine and transmission layer
             trans_df = pd.DataFrame(paths)
             if not trans_df.empty:
                 def get_voltage_color(v):
-                    if v >= 500: return [255, 0, 128, 200]   # High voltage (Magenta)
-                    elif v >= 230: return [255, 140, 0, 200]  # Medium-high (Amber)
-                    else: return [0, 229, 255, 160]          # Standard transmission (Cyan)
+                    if v >= 500: return [255, 0, 128, 200]
+                    elif v >= 230: return [255, 140, 0, 200]
+                    else: return [0, 229, 255, 160]
                 trans_df["color"] = trans_df["voltage"].apply(get_voltage_color)
     except Exception as e:
         try:
@@ -389,11 +388,10 @@ st.info(kinetic_reach_explanation + "\n\n**Active Filter Telemetry Actions:**\n"
 st.markdown("---")
 
 # ---------------------------------------------------------
-# PyDeck 3D Visualization Layer (Including Transmission PathLayer)
+# PyDeck 3D Visualization Layer
 # ---------------------------------------------------------
 layers = []
 
-# 1. Transmission Lines PathLayer
 if show_transmission and not trans_df.empty:
     layer_transmission = pdk.Layer(
         "PathLayer",
@@ -572,9 +570,9 @@ if selected_site:
             
             stress_score = selected_site.get('real_grid_stress', 50.0)
             mr_base = 35000 + (total_mw * 1000 * 110)
-            if score >= 95.0: 
+            if stress_score >= 95.0: 
                 mr_mult = 1.85
-            elif score >= 80.0: 
+            elif stress_score >= 80.0: 
                 mr_mult = 1.35
             else: 
                 mr_mult = 1.0
