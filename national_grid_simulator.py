@@ -40,7 +40,7 @@ def get_db_connection():
 def fetch_real_time_grid_load():
     """
     Pulls live hourly electric grid monitor data (EIA-930) for PJM Interconnection.
-    Compares real-time actual demand vs. forecasted demand to calculate regional grid strain[cite: 1, 2].
+    Compares real-time actual demand vs. forecasted demand to calculate regional grid strain.
     """
     try:
         eia_key = st.secrets["EIA_API_KEY"]
@@ -148,7 +148,7 @@ if not active_polygon:
     st.stop()
 
 # ---------------------------------------------------------
-# Direct PostGIS Spatial Engine (Including Transmission Lines)
+# Direct PostGIS Spatial Engine (Ambiguity-Free Query)
 # ---------------------------------------------------------
 polygon_str = json.dumps(active_polygon.__geo_interface__)
 
@@ -157,7 +157,7 @@ WITH input_poly AS (
     SELECT ST_SetSRID(ST_GeomFromGeoJSON(%s), 4326) AS geom
 ),
 regional_candidates AS (
-    SELECT fuel_stations.site_name, fuel_stations.geom 
+    SELECT fuel_stations.site_name, fuel_stations.geom AS geom 
     FROM fuel_stations, input_poly
     WHERE ST_Intersects(fuel_stations.geom, input_poly.geom)
     LIMIT 2000
@@ -173,15 +173,15 @@ SELECT
     ST_Distance(c.geom::geography, t.geom::geography) / 1609.34 AS trans_dist_miles
 FROM regional_candidates c
 CROSS JOIN LATERAL (
-    SELECT station_name, geom 
-    FROM ev_chargers 
-    ORDER BY c.geom <-> geom 
+    SELECT e_sub.station_name, e_sub.geom AS geom 
+    FROM ev_chargers e_sub 
+    ORDER BY c.geom <-> e_sub.geom 
     LIMIT 1
 ) e
 CROSS JOIN LATERAL (
-    SELECT geom 
-    FROM transmission_lines 
-    ORDER BY c.geom <-> geom 
+    SELECT t_sub.geom AS geom 
+    FROM transmission_lines t_sub 
+    ORDER BY c.geom <-> t_sub.geom 
     LIMIT 1
 ) t;
 """
@@ -215,7 +215,6 @@ if df.empty and chargers_df.empty:
 
 # Enrich candidate data if present
 if not df.empty:
-    # Calculate real composite stress using Live API load + real transmission proximity distance
     df["real_grid_stress"] = (live_pjm_load + (df["trans_dist_miles"] * 8.5)).round(1)
     df["stress_score_str"] = df["real_grid_stress"].astype(str)
     df["is_j40_dac"] = ((df["source_lat"].abs() * 7654321).astype(int) % 100) < 40
