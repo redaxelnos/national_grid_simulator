@@ -35,7 +35,7 @@ def get_db_connection():
     return psycopg2.connect(st.secrets["DATABASE_URL"])
 
 # ---------------------------------------------------------
-# Comprehensive National Balancing Authority Footprints
+# Comprehensive National Balancing Authority Footprints (14 Regions)
 # ---------------------------------------------------------
 ISO_FOOTPRINTS = {
     "PJM": {"name": "PJM Interconnection (Mid-Atlantic / East)", "code": "PJM", "box": box(-85.5, 36.0, -74.0, 43.0)},
@@ -64,7 +64,6 @@ def get_all_intersecting_isos(polygon):
         if polygon.intersects(data["box"]):
             affected.append((data["code"], data["name"]))
     
-    # Fallback if no explicit geometric intersection is triggered
     if not affected:
         return [("MISO", "MISO (Midwest ISO)")]
     return affected
@@ -104,11 +103,18 @@ st.sidebar.markdown("---")
 st.sidebar.header("⚖️ Equity & Policy Filters")
 j40_filter = st.sidebar.checkbox("Isolate Justice40 DAC Sites", value=False, help="Filter candidate sites to Disadvantaged Communities.")
 
-with st.sidebar.expander("🧠 Methodology & Critical Context", expanded=False):
+with st.sidebar.expander("🧠 Methodology & Critical Context", expanded=True):
     st.markdown("""
+    **The Visual Metaphor: Pillars vs. Glowing Pads**
+    *   **Neon Green Glowing Pads:** Represent existing active DC Fast-Charging hubs queried live from federal databases. Rendered flat because they have a grid deficit of zero—they are the physical anchors of the network.
+    *   **Extruded 3D Pillars:** Represent candidate brownfield gas station retrofits. Their height and color visualize intervention value and Make-Ready capital requirements.
+
+    **Why a 2.0-Mile Threshold?**
+    In dense metro corridors, a 2-mile spatial gap is a structural barrier for multi-unit dwelling (MUD) residents who cannot charge at home, destroying the EV value proposition if exceeded.
+
     **National Grid Oversight Architecture:**
     *   **Full Lower 48 Coverage:** Encompasses all 14 EIA-930 operating regions, including Pacific Northwest (BPA/WA/OR), Montana, Southwest, Southeast, Carolinas, Florida, and Tennessee.
-    *   **Multi-Jurisdictional Seam Analysis:** Automatically identifies overlapping regional footprints and balancing authorities for complete regulatory transparency.
+    *   **Multi-Jurisdictional Seam Analysis:** Automatically identifies overlapping regional footprints and balancing authorities across state borders for complete regulatory transparency.
     """)
 
 st.sidebar.markdown("---")
