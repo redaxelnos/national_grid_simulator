@@ -24,7 +24,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("⚡ EV Grid Command & Kinetic Reach Simulator")
+st.title("⚡ EV Grid Command & Kinetic Reach Simulator (National View)")
 
 # ---------------------------------------------------------
 # Database Connection (Securely via Streamlit Secrets)
@@ -74,7 +74,7 @@ live_pjm_load = fetch_real_time_grid_load()
 # Sidebar Controls & Reset Button
 # ---------------------------------------------------------
 st.sidebar.header("🎯 Spatial Boundary Tool")
-st.sidebar.markdown("Use the polygon or rectangle tool on the interactive map below to isolate any corridor or region. PostGIS will instantly calculate distance telemetry.")
+st.sidebar.markdown("Use the polygon or rectangle tool on the interactive national map below to isolate any corridor or region across the U.S. PostGIS will instantly calculate distance telemetry.")
 
 if st.sidebar.button("🔄 Reset / Clear Drawn Boundary", use_container_width=True):
     for key in list(st.session_state.keys()):
@@ -121,9 +121,9 @@ camera_pitch = st.sidebar.slider("Camera Pitch", min_value=30, max_value=60, val
 camera_bearing = st.sidebar.slider("Camera Rotation", min_value=-180, max_value=180, value=-22, step=2)
 
 # ---------------------------------------------------------
-# Interactive Folium Map with Drawing Tools
+# Interactive Folium Map defaulted to National View (Kansas Center)
 # ---------------------------------------------------------
-m = folium.Map(location=[40.4406, -79.9959], zoom_start=11, tiles="CartoDB dark_matter")
+m = folium.Map(location=[39.8283, -98.5795], zoom_start=4, tiles="CartoDB dark_matter")
 Draw(
     export=False,
     draw_options={
@@ -136,7 +136,7 @@ Draw(
     }
 ).add_to(m)
 
-draw_output = st_folium(m, width="100%", height=350, key="interactive_map")
+draw_output = st_folium(m, width="100%", height=400, key="interactive_map")
 
 active_polygon = None
 if draw_output and draw_output.get("last_active_drawing"):
@@ -144,11 +144,11 @@ if draw_output and draw_output.get("last_active_drawing"):
     active_polygon = shape(geom_dict)
 
 if not active_polygon:
-    st.info("👆 Draw a polygon or rectangle on the map above to query your PostGIS database across your national records.")
+    st.info("👆 Draw a polygon or rectangle anywhere on the national map above to query your PostGIS database across the United States.")
     st.stop()
 
 # ---------------------------------------------------------
-# Direct PostGIS Spatial Engine (Ambiguity-Free Query)
+# Direct PostGIS Spatial Engine (Ambiguity-Free Query with Rollback)
 # ---------------------------------------------------------
 polygon_str = json.dumps(active_polygon.__geo_interface__)
 
@@ -206,11 +206,15 @@ with st.spinner("Querying PostGIS spatial engine and transmission layers..."):
         df = pd.read_sql(candidates_query, conn, params=(polygon_str,))
         chargers_df = pd.read_sql(chargers_query, conn, params=(polygon_str,))
     except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         st.error(f"Database Query Error: {e}")
         df, chargers_df = pd.DataFrame(), pd.DataFrame()
 
 if df.empty and chargers_df.empty:
-    st.warning("No sites found within the drawn boundary. Try drawing a larger box over a metropolitan area like Pittsburgh.")
+    st.warning("No sites found within the drawn boundary. Try drawing a larger box over any metropolitan area in the U.S.")
     st.stop()
 
 # Enrich candidate data if present
