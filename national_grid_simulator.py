@@ -3,7 +3,7 @@ import pydeck as pdk
 import folium
 from folium.plugins import Draw
 from streamlit_folium import st_folium
-from shapely.geometry import shape
+from shapely.geometry import shape, box
 import pandas as pd
 import psycopg2
 import json
@@ -21,10 +21,11 @@ st.markdown("""
     div[data-testid="stMetricValue"] { font-family: 'Consolas', monospace; font-size: 28px; color: #00ff88; text-shadow: 0 0 8px rgba(0,255,136,0.3); }
     div[data-testid="stMetricLabel"] { font-size: 13px; text-transform: uppercase; letter-spacing: 1px; color: #8b949e; }
     hr { border-color: #30363d; margin: 8px 0; }
+    .iso-badge { background-color: #1f2937; color: #58a6ff; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-family: monospace; border: 1px solid #30363d; display: inline-block; margin: 2px; }
 </style>
 """, unsafe_allow_html=True)
 
-st.title("⚡ Nationwide EV Grid Command & Kinetic Reach Simulator (Stabilized Multi-ISO Engine)")
+st.title("⚡ Nationwide EV Grid Command & Kinetic Reach Simulator (Multi-ISO Intersection Engine)")
 
 # ---------------------------------------------------------
 # Database Connection (Securely via Streamlit Secrets)
@@ -34,40 +35,39 @@ def get_db_connection():
     return psycopg2.connect(st.secrets["DATABASE_URL"])
 
 # ---------------------------------------------------------
-# Robust Multi-ISO Balancing Authority Routing Engine
+# Multi-ISO Spatial Intersection Engine
 # ---------------------------------------------------------
-def auto_detect_balancing_authority(polygon):
-    """
-    Evaluates the bounding box and centroid to map spatial coordinates 
-    to the correct U.S. Balancing Authority, handling multi-ISO border seams.
-    """
-    bounds = polygon.bounds # (minx, miny, maxx, maxy)
-    centroid = polygon.centroid
-    lon, lat = centroid.x, centroid.y
+# Define generalized bounding boxes for major U.S. RTOs/ISOs
+ISO_FOOTPRINTS = {
+    "PJM": {"name": "PJM Interconnection (Mid-Atlantic / East)", "box": box(-85.5, 36.0, -74.0, 43.0)},
+    "MISO": {"name": "MISO (Midwest ISO)", "box": box(-105.0, 28.0, -80.0, 49.0)},
+    "CISO": {"name": "CAISO (California ISO)", "box": box(-124.5, 32.5, -114.0, 42.0)},
+    "ERCOT": {"name": "ERCOT (Texas Reliability Entity)", "box": box(-106.6, 25.8, -93.5, 36.5)},
+    "SPP": {"name": "SPP (Southwest Power Pool)", "box": box(-106.0, 33.0, -94.0, 49.0)},
+    "NYISO": {"name": "NYISO (New York ISO)", "box": box(-79.8, 40.5, -71.8, 45.0)},
+    "ISNE": {"name": "ISO-NE (New England ISO)", "box": box(-73.5, 41.0, -66.9, 47.5)}
+}
 
-    # Check for multi-ISO border overlaps (e.g., PJM/MISO seam around PA/OH/WV)
-    if -82.0 <= lon <= -79.0 and 39.0 <= lat <= 42.0:
-        return "PJM", "PJM / MISO Seam (Defaulted to PJM Interconnection)"
-
-    if -106.6 <= lon <= -93.5 and 25.8 <= lat <= 36.5:
-        return "ERCOT", "ERCOT (Texas Reliability Entity)"
-    elif lon < -114.0 or (-124.4 <= lon <= -114.0 and 32.5 <= lat <= 42.0):
-        return "CISO", "CAISO (California ISO)"
-    elif -79.8 <= lon <= -71.8 and 40.5 <= lat <= 45.0:
-        return "NYISO", "NYISO (New York ISO)"
-    elif -73.5 <= lon <= -66.9 and 41.0 <= lat <= 47.5:
-        return "ISNE", "ISO-NE (New England ISO)"
-    elif -84.8 <= lon <= -74.0 and 36.5 <= lat <= 42.5:
-        return "PJM", "PJM Interconnection (Mid-Atlantic / East)"
-    elif -106.0 <= lon < -94.0 and 33.0 <= lat <= 49.0:
-        return "SPP", "SPP (Southwest Power Pool)"
-    return "MISO", "MISO (Midwest ISO)"
+def get_all_intersecting_isos(polygon):
+    """
+    Evaluates a drawn polygon against all major U.S. ISO footprints 
+    to return every balancing authority jurisdiction affecting the area.
+    """
+    affected = []
+    for code, data in ISO_FOOTPRINTS.items():
+        if polygon.intersects(data["box"]):
+            affected.append((code, data["name"]))
+    
+    # Fallback if no explicit geometric intersection is triggered
+    if not affected:
+        return [("MISO", "MISO (Midwest ISO)")]
+    return affected
 
 # ---------------------------------------------------------
 # Sidebar Spatial & Visual Controls
 # ---------------------------------------------------------
 st.sidebar.header("🎯 Spatial Boundary Tool")
-st.sidebar.markdown("Draw a polygon or rectangle anywhere in the U.S. The stabilized engine detects regional Balancing Authorities without UI flickering.")
+st.sidebar.markdown("Draw a polygon or rectangle anywhere in the U.S. The multi-ISO engine automatically detects **all** overlapping grid jurisdictions.")
 
 if st.sidebar.button("🔄 Reset / Clear Drawn Boundary", use_container_width=True):
     for key in list(st.session_state.keys()):
@@ -100,9 +100,9 @@ j40_filter = st.sidebar.checkbox("Isolate Justice40 DAC Sites", value=False, hel
 
 with st.sidebar.expander("🧠 Methodology & Critical Context", expanded=False):
     st.markdown("""
-    **Stabilized Spatial Architecture:**
-    *   **Multi-ISO Seam Handling:** Detects overlapping regional grid boundaries (such as the PJM/MISO industrial corridor) to prevent telemetry state bouncing.
-    *   **PostGIS Path Layer:** High-voltage transmission lines are queried directly within your bounding box and rendered as 3D paths color-coded by line voltage.
+    **Multi-Jurisdictional Seam Analysis:**
+    *   **Polygon Intersection:** Rather than picking a single arbitrary center point, the engine tests your boundary against multi-state RTO/ISO bounding boxes.
+    *   **Overlapping Oversight:** If a corridor or site straddles a seam (like PJM and MISO), all governing authorities are displayed for complete regulatory transparency.
     """)
 
 st.sidebar.markdown("---")
@@ -112,7 +112,7 @@ camera_pitch = st.sidebar.slider("Camera Pitch", min_value=30, max_value=60, val
 camera_bearing = st.sidebar.slider("Camera Rotation", min_value=-180, max_value=180, value=-22, step=2)
 
 # ---------------------------------------------------------
-# Interactive Folium Map (Stabilized State Container)
+# Interactive Folium Map
 # ---------------------------------------------------------
 m = folium.Map(location=[39.8283, -98.5795], zoom_start=4, tiles="CartoDB dark_matter")
 Draw(
@@ -127,7 +127,6 @@ Draw(
     }
 ).add_to(m)
 
-# Use a stable container to prevent map recreation flicker
 map_container = st.container()
 with map_container:
     draw_output = st_folium(m, width="100%", height=400, key="interactive_map")
@@ -138,19 +137,22 @@ if draw_output and draw_output.get("last_active_drawing"):
     active_polygon = shape(geom_dict)
 
 if not active_polygon:
-    st.info("👆 Draw a polygon or rectangle anywhere on the U.S. map above. The system will automatically route the grid telemetry and query PostGIS.")
+    st.info("👆 Draw a polygon or rectangle anywhere on the U.S. map above. The system will automatically detect all intersecting ISO jurisdictions.")
     st.stop()
 
 # ---------------------------------------------------------
-# Auto-Detect Respondent from Drawn Polygon
+# Detect All Intersecting ISOs for the Drawn Boundary
 # ---------------------------------------------------------
-auto_respondent_code, auto_respondent_label = auto_detect_balancing_authority(active_polygon)
+intersecting_isos = get_all_intersecting_isos(active_polygon)
+primary_iso_code, primary_iso_label = intersecting_isos[0]
 
 st.sidebar.markdown("---")
-st.sidebar.success(f"⚡ **Auto-Routed ISO:**\n`{auto_respondent_label}`")
+st.sidebar.markdown("⚡ **Governing ISO Jurisdictions:**")
+for code, label in intersecting_isos:
+    st.sidebar.markdown(f"<span class='iso-badge'>{label}</span>", unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# Live EIA-930 API Integration
+# Live EIA-930 API Integration (Primary Governing ISO)
 # ---------------------------------------------------------
 @st.cache_data(ttl=3600)
 def fetch_real_time_grid_load(respondent):
@@ -176,7 +178,7 @@ def fetch_real_time_grid_load(respondent):
     except Exception:
         return 85.0
 
-live_region_load = fetch_real_time_grid_load(auto_respondent_code)
+live_region_load = fetch_real_time_grid_load(primary_iso_code)
 
 # ---------------------------------------------------------
 # Direct PostGIS Spatial Queries
@@ -361,14 +363,9 @@ col4.metric(
 st.markdown("---")
 st.markdown("### 📡 Dynamic Telemetry & Kinetic Reach Briefing")
 
-kinetic_reach_explanation = (
-    "**What is Kinetic Reach?**\n"
-    "Kinetic Reach measures the spatial travel distance and logistical energy gap that drivers must bridge "
-    "between unserved commercial brownfield sites (gas stations) and the nearest active electrical grid anchor hubs (DCFC chargers). "
-    "When rendered as arcs, it maps structural connectivity deficits across regional transit corridors."
-)
+iso_names_str = ", ".join([label for _, label in intersecting_isos])
+filter_actions = [f"• **Governing ISO Jurisdictions:** {iso_names_str}"]
 
-filter_actions = []
 if layer_focus == "Comparative (Both Layers)":
     filter_actions.append("• **Infrastructure Layer:** Dual-layer overlay active, rendering candidate gas station retrofits alongside existing active EV charging anchor hubs.")
 elif layer_focus == "Candidate Gas Station Retrofits Only":
@@ -382,7 +379,7 @@ if show_transmission:
 if "Spatial" in visual_mode:
     filter_actions.append("• **Telemetry Mode:** *Spatial Distance (Grid Deficit)* is active. 3D column heights represent physical mileage gaps to the nearest charging hub, flagging commercial 'EV Deserts' (>2.0 mi).")
 else:
-    filter_actions.append(f"• **Telemetry Mode:** *Live Transmission Corridor Stress* is active ({auto_respondent_label} Load at {live_region_load}% + PostGIS Transmission Proximity). 3D column heights and highlights indicate Make-Ready capital requirements.")
+    filter_actions.append(f"• **Telemetry Mode:** *Live Transmission Corridor Stress* is active ({primary_iso_label} Load at {live_region_load}% + PostGIS Transmission Proximity).")
 
 if j40_filter:
     filter_actions.append("• **Equity Filter:** *Justice40 DAC Isolation* is enabled. Candidates are filtered strictly to Disadvantaged Communities eligible for prioritized federal clean energy grants.")
@@ -394,7 +391,7 @@ if show_arcs and layer_focus != "Existing EV Charging Hubs Only":
 else:
     filter_actions.append("• **Kinetic Reach Arcs:** Hidden or disabled for the active layer view.")
 
-st.info(kinetic_reach_explanation + "\n\n**Active Filter Telemetry Actions:**\n" + "\n".join(filter_actions))
+st.info("**Active Filter Telemetry Actions:**\n" + "\n".join(filter_actions))
 st.markdown("---")
 
 # ---------------------------------------------------------
@@ -488,7 +485,7 @@ tooltip_html = (
     "<span style='color: #8b949e;'>Transmission Gap:</span> {trans_dist_miles} miles<br/>"
     "<hr style='margin: 6px 0; border: 0; border-top: 1px solid #30363d;'/>"
     "<b style='color: #c9d1d9;'>Federal Grid Telemetry:</b><br/>"
-    "<span style='color: #8b949e;'>Live " + auto_respondent_label + " Load:</span> <b>" + str(live_region_load) + "%</b><br/>"
+    "<span style='color: #8b949e;'>Governing ISO(s):</span> <b>" + iso_names_str + "</b><br/>"
     "<hr style='margin: 6px 0; border: 0; border-top: 1px solid #30363d;'/>"
     "<b style='color: #c9d1d9;'>Executive Insight:</b><br/>"
     "<span style='color: #a5d6ff; line-height: 1.3;'>{insight}</span>"
@@ -541,11 +538,11 @@ if selected_site:
             
     with col_b:
         if site_type == "candidate":
-            st.markdown("#### ⚡ Real-Time Grid Telemetry")
-            st.markdown(f"**Live {auto_respondent_label} Load (EIA-930):** `{live_region_load}%`")
+            st.markdown("#### ⚡ Multi-ISO Grid Oversight")
+            st.markdown(f"**Governing Jurisdictions:** `{iso_names_str}`")
+            st.markdown(f"**Primary EIA-930 Load ({primary_iso_code}):** `{live_region_load}%`")
             st.markdown(f"**Composite Stress Score:** `{selected_site.get('real_grid_stress', 0.0)} / 150`")
             st.markdown(f"• **Transmission Proximity:** `~{selected_site.get('trans_dist_miles', 0.0)} miles away`")
-            st.markdown(f"• **Spatial Grid Deficit:** `{selected_site.get('dist_miles', 0.0)} miles to charger`")
             
             score = selected_site.get('real_grid_stress', 0.0)
             if score >= 95.0:
@@ -557,8 +554,8 @@ if selected_site:
         else:
             st.markdown("#### ⚡ Operating Grid Anchor Telemetry")
             st.success("Active Load Verified: Fully operational DC Fast Charging hub.")
+            st.markdown(f"**Governing Jurisdictions:** `{iso_names_str}`")
             st.markdown("**Grid Deficit:** `0.00 miles` (System Baseline Node)")
-            st.markdown("**Corridor Compliance:** Meets federal 150kW+ concurrent delivery baseline.")
             
     with col_c:
         st.markdown("#### ⚙️ Dynamic CAPEX Calculator")
