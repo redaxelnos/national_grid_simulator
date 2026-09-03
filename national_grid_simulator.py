@@ -25,7 +25,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("⚡ Nationwide EV Grid Command & Kinetic Reach Simulator (Multi-ISO Intersection Engine)")
+st.title("⚡ Nationwide EV Grid Command & Kinetic Reach Simulator (Comprehensive EIA-930 Engine)")
 
 # ---------------------------------------------------------
 # Database Connection (Securely via Streamlit Secrets)
@@ -35,28 +35,34 @@ def get_db_connection():
     return psycopg2.connect(st.secrets["DATABASE_URL"])
 
 # ---------------------------------------------------------
-# Multi-ISO Spatial Intersection Engine
+# Comprehensive National Balancing Authority Footprints
 # ---------------------------------------------------------
-# Define generalized bounding boxes for major U.S. RTOs/ISOs
 ISO_FOOTPRINTS = {
-    "PJM": {"name": "PJM Interconnection (Mid-Atlantic / East)", "box": box(-85.5, 36.0, -74.0, 43.0)},
-    "MISO": {"name": "MISO (Midwest ISO)", "box": box(-105.0, 28.0, -80.0, 49.0)},
-    "CISO": {"name": "CAISO (California ISO)", "box": box(-124.5, 32.5, -114.0, 42.0)},
-    "ERCOT": {"name": "ERCOT (Texas Reliability Entity)", "box": box(-106.6, 25.8, -93.5, 36.5)},
-    "SPP": {"name": "SPP (Southwest Power Pool)", "box": box(-106.0, 33.0, -94.0, 49.0)},
-    "NYISO": {"name": "NYISO (New York ISO)", "box": box(-79.8, 40.5, -71.8, 45.0)},
-    "ISNE": {"name": "ISO-NE (New England ISO)", "box": box(-73.5, 41.0, -66.9, 47.5)}
+    "PJM": {"name": "PJM Interconnection (Mid-Atlantic / East)", "code": "PJM", "box": box(-85.5, 36.0, -74.0, 43.0)},
+    "MISO": {"name": "MISO (Midwest ISO)", "code": "MISO", "box": box(-105.0, 28.0, -84.0, 49.0)},
+    "CISO": {"name": "CAISO (California ISO)", "code": "CISO", "box": box(-124.5, 32.5, -114.0, 42.0)},
+    "ERCOT": {"name": "ERCOT (Texas Reliability Entity)", "code": "ERCO", "box": box(-106.6, 25.8, -93.5, 36.5)},
+    "SPP": {"name": "SPP (Southwest Power Pool)", "code": "SWPP", "box": box(-106.0, 33.0, -94.0, 49.0)},
+    "NYISO": {"name": "NYISO (New York ISO)", "code": "NYIS", "box": box(-79.8, 40.5, -71.8, 45.0)},
+    "ISNE": {"name": "ISO-NE (New England ISO)", "code": "ISNE", "box": box(-73.5, 41.0, -66.9, 47.5)},
+    "NW_BPAT": {"name": "Northwest - BPA (WA / OR / ID)", "code": "BPAT", "box": box(-125.0, 41.9, -110.0, 49.0)},
+    "NW_NWMT": {"name": "Northwest - NorthWestern Energy (Montana)", "code": "NWMT", "box": box(-116.0, 44.3, -104.0, 49.0)},
+    "SW_AZPS": {"name": "Southwest - APS (Arizona / New Mexico)", "code": "AZPS", "box": box(-115.0, 31.3, -103.0, 37.0)},
+    "SE_SOCO": {"name": "Southeast - Southern Company", "code": "SOCO", "box": box(-88.5, 30.0, -80.0, 36.5)},
+    "CAR_DUK": {"name": "Carolinas - Duke Energy", "code": "DUK", "box": box(-84.0, 32.0, -75.0, 37.0)},
+    "FLA_FPL": {"name": "Florida - FPL / FPC", "code": "FPL", "box": box(-87.6, 24.5, -79.8, 31.0)},
+    "TVA": {"name": "Tennessee Valley Authority (TVA)", "code": "TVA", "box": box(-90.3, 34.8, -81.9, 36.7)}
 }
 
 def get_all_intersecting_isos(polygon):
     """
-    Evaluates a drawn polygon against all major U.S. ISO footprints 
+    Evaluates a drawn polygon against all 14 major U.S. grid footprints 
     to return every balancing authority jurisdiction affecting the area.
     """
     affected = []
-    for code, data in ISO_FOOTPRINTS.items():
+    for key, data in ISO_FOOTPRINTS.items():
         if polygon.intersects(data["box"]):
-            affected.append((code, data["name"]))
+            affected.append((data["code"], data["name"]))
     
     # Fallback if no explicit geometric intersection is triggered
     if not affected:
@@ -67,7 +73,7 @@ def get_all_intersecting_isos(polygon):
 # Sidebar Spatial & Visual Controls
 # ---------------------------------------------------------
 st.sidebar.header("🎯 Spatial Boundary Tool")
-st.sidebar.markdown("Draw a polygon or rectangle anywhere in the U.S. The multi-ISO engine automatically detects **all** overlapping grid jurisdictions.")
+st.sidebar.markdown("Draw a polygon or rectangle anywhere in the U.S. The national engine automatically detects all overlapping ISO/BA jurisdictions.")
 
 if st.sidebar.button("🔄 Reset / Clear Drawn Boundary", use_container_width=True):
     for key in list(st.session_state.keys()):
@@ -100,9 +106,9 @@ j40_filter = st.sidebar.checkbox("Isolate Justice40 DAC Sites", value=False, hel
 
 with st.sidebar.expander("🧠 Methodology & Critical Context", expanded=False):
     st.markdown("""
-    **Multi-Jurisdictional Seam Analysis:**
-    *   **Polygon Intersection:** Rather than picking a single arbitrary center point, the engine tests your boundary against multi-state RTO/ISO bounding boxes.
-    *   **Overlapping Oversight:** If a corridor or site straddles a seam (like PJM and MISO), all governing authorities are displayed for complete regulatory transparency.
+    **National Grid Oversight Architecture:**
+    *   **Full Lower 48 Coverage:** Encompasses all 14 EIA-930 operating regions, including Pacific Northwest (BPA/WA/OR), Montana, Southwest, Southeast, Carolinas, Florida, and Tennessee.
+    *   **Multi-Jurisdictional Seam Analysis:** Automatically identifies overlapping regional footprints and balancing authorities for complete regulatory transparency.
     """)
 
 st.sidebar.markdown("---")
@@ -137,22 +143,22 @@ if draw_output and draw_output.get("last_active_drawing"):
     active_polygon = shape(geom_dict)
 
 if not active_polygon:
-    st.info("👆 Draw a polygon or rectangle anywhere on the U.S. map above. The system will automatically detect all intersecting ISO jurisdictions.")
+    st.info("👆 Draw a polygon or rectangle anywhere on the U.S. map above. The system will automatically detect all intersecting ISO and Balancing Authority jurisdictions.")
     st.stop()
 
 # ---------------------------------------------------------
-# Detect All Intersecting ISOs for the Drawn Boundary
+# Detect All Intersecting ISOs / BAs for the Drawn Boundary
 # ---------------------------------------------------------
 intersecting_isos = get_all_intersecting_isos(active_polygon)
 primary_iso_code, primary_iso_label = intersecting_isos[0]
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("⚡ **Governing ISO Jurisdictions:**")
+st.sidebar.markdown("⚡ **Governing Jurisdictions:**")
 for code, label in intersecting_isos:
-    st.sidebar.markdown(f"<span class='iso-badge'>{label}</span>", unsafe_allow_html=True)
+    st.sidebar.markdown(f"<span class='iso-badge'>{label} (`{code}`)</span>", unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# Live EIA-930 API Integration (Primary Governing ISO)
+# Live EIA-930 API Integration (Primary Governing Authority)
 # ---------------------------------------------------------
 @st.cache_data(ttl=3600)
 def fetch_real_time_grid_load(respondent):
@@ -364,7 +370,7 @@ st.markdown("---")
 st.markdown("### 📡 Dynamic Telemetry & Kinetic Reach Briefing")
 
 iso_names_str = ", ".join([label for _, label in intersecting_isos])
-filter_actions = [f"• **Governing ISO Jurisdictions:** {iso_names_str}"]
+filter_actions = [f"• **Governing Jurisdictions:** {iso_names_str}"]
 
 if layer_focus == "Comparative (Both Layers)":
     filter_actions.append("• **Infrastructure Layer:** Dual-layer overlay active, rendering candidate gas station retrofits alongside existing active EV charging anchor hubs.")
@@ -379,7 +385,7 @@ if show_transmission:
 if "Spatial" in visual_mode:
     filter_actions.append("• **Telemetry Mode:** *Spatial Distance (Grid Deficit)* is active. 3D column heights represent physical mileage gaps to the nearest charging hub, flagging commercial 'EV Deserts' (>2.0 mi).")
 else:
-    filter_actions.append(f"• **Telemetry Mode:** *Live Transmission Corridor Stress* is active ({primary_iso_label} Load at {live_region_load}% + PostGIS Transmission Proximity).")
+    filter_actions.append(f"• **Telemetry Mode:** *Live Corridor Stress* is active ({primary_iso_label} Load at {live_region_load}% + PostGIS Transmission Proximity).")
 
 if j40_filter:
     filter_actions.append("• **Equity Filter:** *Justice40 DAC Isolation* is enabled. Candidates are filtered strictly to Disadvantaged Communities eligible for prioritized federal clean energy grants.")
@@ -450,7 +456,6 @@ if show_candidates and not df.empty:
 if show_chargers and not chargers_df.empty:
     layer_hub_halo = pdk.Layer(
         "ScatterplotLayer",
-        id="charger_halo",
         data=chargers_df,
         get_position=["lon", "lat"],
         get_fill_color="color_halo",
@@ -485,7 +490,8 @@ tooltip_html = (
     "<span style='color: #8b949e;'>Transmission Gap:</span> {trans_dist_miles} miles<br/>"
     "<hr style='margin: 6px 0; border: 0; border-top: 1px solid #30363d;'/>"
     "<b style='color: #c9d1d9;'>Federal Grid Telemetry:</b><br/>"
-    "<span style='color: #8b949e;'>Governing ISO(s):</span> <b>" + iso_names_str + "</b><br/>"
+    "<span style='color: #8b949e;'>Governing Jurisdictions:</span> <b>" + iso_names_str + "</b><br/>"
+    "<span style='color: #8b949e;'>Live Load (" + primary_iso_code + "):</span> <b>" + str(live_region_load) + "%</b><br/>"
     "<hr style='margin: 6px 0; border: 0; border-top: 1px solid #30363d;'/>"
     "<b style='color: #c9d1d9;'>Executive Insight:</b><br/>"
     "<span style='color: #a5d6ff; line-height: 1.3;'>{insight}</span>"
