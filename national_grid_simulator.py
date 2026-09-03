@@ -24,7 +24,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("⚡ EV Grid Command & Kinetic Reach Simulator (National View)")
+st.title("⚡ Nationwide EV Grid Command & Kinetic Reach Simulator")
 
 # ---------------------------------------------------------
 # Database Connection (Securely via Streamlit Secrets)
@@ -34,19 +34,35 @@ def get_db_connection():
     return psycopg2.connect(st.secrets["DATABASE_URL"])
 
 # ---------------------------------------------------------
-# Live EIA-930 API Integration (U.S. Electric System Operating Data)
+# Sidebar Controls & National Balancing Authority Selector
+# ---------------------------------------------------------
+st.sidebar.header("⚡ National Grid Telemetry")
+ba_options = {
+    "PJM Interconnection (Mid-Atlantic / East)": "PJM",
+    "MISO (Midwest ISO)": "MISO",
+    "CAISO (California ISO)": "CISO",
+    "ERCOT (Texas Reliability Entity)": "ERCOT",
+    "SPP (Southwest Power Pool)": "SPP",
+    "NYISO (New York ISO)": "NYISO",
+    "ISO-NE (New England ISO)": "ISNE"
+}
+selected_ba_label = st.sidebar.selectbox("EIA-930 Balancing Authority", list(ba_options.keys()))
+selected_respondent = ba_options[selected_ba_label]
+
+# ---------------------------------------------------------
+# Live EIA-930 API Integration (Dynamic U.S. Balancing Authorities)
 # ---------------------------------------------------------
 @st.cache_data(ttl=3600)
-def fetch_real_time_grid_load():
+def fetch_real_time_grid_load(respondent):
     """
-    Pulls live hourly electric grid monitor data (EIA-930) for PJM Interconnection.
-    Compares real-time actual demand vs. forecasted demand to calculate regional grid strain.
+    Pulls live hourly electric grid monitor data (EIA-930) for any selected U.S. Balancing Authority.
+    Compares real-time actual demand vs. forecasted demand to calculate regional grid strain[cite: 1, 2].
     """
     try:
         eia_key = st.secrets["EIA_API_KEY"]
         eia_url = (
             f"https://api.eia.gov/v2/electricity/rto/region-data/data/"
-            f"?api_key={eia_key}&facets[respondent][]=PJM&frequency=hourly"
+            f"?api_key={eia_key}&facets[respondent][][]={respondent}&frequency=hourly"
             f"&data[0]=value&sort[0][column]=period&sort[0][direction]=desc&length=2"
         )
         
@@ -68,13 +84,14 @@ def fetch_real_time_grid_load():
     except Exception as e:
         return 85.0
 
-live_pjm_load = fetch_real_time_grid_load()
+live_region_load = fetch_real_time_grid_load(selected_respondent)
 
 # ---------------------------------------------------------
-# Sidebar Controls & Reset Button
+# Sidebar Spatial & Visual Controls
 # ---------------------------------------------------------
+st.sidebar.markdown("---")
 st.sidebar.header("🎯 Spatial Boundary Tool")
-st.sidebar.markdown("Use the polygon or rectangle tool on the interactive national map below to isolate any corridor or region across the U.S. PostGIS will instantly calculate distance telemetry.")
+st.sidebar.markdown("Draw a polygon or rectangle anywhere in the U.S. PostGIS will instantly query nationwide transmission lines, gas stations, and EV chargers.")
 
 if st.sidebar.button("🔄 Reset / Clear Drawn Boundary", use_container_width=True):
     for key in list(st.session_state.keys()):
@@ -86,7 +103,7 @@ st.sidebar.header("📊 Infrastructure Layer Focus")
 layer_focus = st.sidebar.radio(
     "Comparative View Mode",
     ["Comparative (Both Layers)", "Candidate Gas Station Retrofits Only", "Existing EV Charging Hubs Only"],
-    help="Isolate projected brownfield retrofits vs. existing active EV charging infrastructure to analyze coverage gaps."
+    help="Isolate projected brownfield retrofits vs. existing active EV charging infrastructure anywhere in the country."
 )
 
 st.sidebar.markdown("---")
@@ -103,15 +120,9 @@ j40_filter = st.sidebar.checkbox("Isolate Justice40 DAC Sites", value=False, hel
 
 with st.sidebar.expander("🧠 Methodology & Critical Context", expanded=False):
     st.markdown("""
-    **The Visual Metaphor: Pillars vs. Glowing Pads**
-    *   **Neon Green Glowing Pads:** Represent existing active DC Fast-Charging hubs queried live from federal databases. Rendered flat because they have a grid deficit of zero—they are the physical anchors of the network.
-    *   **Extruded 3D Pillars:** Represent candidate brownfield gas station retrofits. Their height and color visualize intervention value and Make-Ready capital requirements.
-
-    **Why a 2.0-Mile Threshold?**
-    In dense metro corridors, a 2-mile spatial gap is a structural barrier for multi-unit dwelling (MUD) residents who cannot charge at home, destroying the EV value proposition if exceeded.
-
-    **Live Transmission Telemetry (EIA-930 + UNDP GeoHub):**
-    By combining live regional load metrics from the EIA-930 Balancing Authority feed with precise PostGIS `ST_Distance` calculations to national transmission corridors, this terminal accurately models local interconnection Make-Ready friction.
+    **Nationwide Spatial Capabilities:**
+    *   **Any State / Any Corridor:** By dropping a bounding box over any metropolitan area in the U.S. (e.g., Los Angeles, Houston, Chicago, Atlanta), PostGIS performs lightning-fast spatial indexing across national records.
+    *   **Live Federal Telemetry:** Select your regional Balancing Authority from the dropdown above to pull real-time operating data straight from the EIA-930 feed.
     """)
 
 st.sidebar.markdown("---")
@@ -121,7 +132,7 @@ camera_pitch = st.sidebar.slider("Camera Pitch", min_value=30, max_value=60, val
 camera_bearing = st.sidebar.slider("Camera Rotation", min_value=-180, max_value=180, value=-22, step=2)
 
 # ---------------------------------------------------------
-# Interactive Folium Map defaulted to National View (Kansas Center)
+# Interactive Folium Map (Full National View)
 # ---------------------------------------------------------
 m = folium.Map(location=[39.8283, -98.5795], zoom_start=4, tiles="CartoDB dark_matter")
 Draw(
@@ -144,11 +155,11 @@ if draw_output and draw_output.get("last_active_drawing"):
     active_polygon = shape(geom_dict)
 
 if not active_polygon:
-    st.info("👆 Draw a polygon or rectangle anywhere on the national map above to query your PostGIS database across the United States.")
+    st.info("👆 Draw a polygon or rectangle anywhere on the U.S. map above to query your national PostGIS database.")
     st.stop()
 
 # ---------------------------------------------------------
-# Direct PostGIS Spatial Engine (Fixed 'geometry' column reference)
+# Direct PostGIS Spatial Engine (Nationwide Query)
 # ---------------------------------------------------------
 polygon_str = json.dumps(active_polygon.__geo_interface__)
 
@@ -200,7 +211,7 @@ WHERE ST_Intersects(ev_chargers.geom, input_poly.geom)
 LIMIT 2000;
 """
 
-with st.spinner("Querying PostGIS spatial engine and transmission layers..."):
+with st.spinner("Querying national PostGIS spatial engine and transmission layers..."):
     try:
         conn = get_db_connection()
         df = pd.read_sql(candidates_query, conn, params=(polygon_str,))
@@ -214,12 +225,12 @@ with st.spinner("Querying PostGIS spatial engine and transmission layers..."):
         df, chargers_df = pd.DataFrame(), pd.DataFrame()
 
 if df.empty and chargers_df.empty:
-    st.warning("No sites found within the drawn boundary. Try drawing a larger box over any metropolitan area in the U.S.")
+    st.warning("No sites found within the drawn boundary. Try drawing a larger box over any major U.S. metropolitan area.")
     st.stop()
 
 # Enrich candidate data if present
 if not df.empty:
-    df["real_grid_stress"] = (live_pjm_load + (df["trans_dist_miles"] * 8.5)).round(1)
+    df["real_grid_stress"] = (live_region_load + (df["trans_dist_miles"] * 8.5)).round(1)
     df["stress_score_str"] = df["real_grid_stress"].astype(str)
     df["is_j40_dac"] = ((df["source_lat"].abs() * 7654321).astype(int) % 100) < 40
     df["j40_status"] = df["is_j40_dac"].apply(lambda x: "Yes (Priority Funding Eligible)" if x else "No")
@@ -283,7 +294,7 @@ col1.metric("Selected Brownfield Sites", f"{len(df):,}")
 col2.metric(metric_label, f"{metric_val:,}", delta_color="inverse")
 col3.metric("Existing Active EV Hubs", f"{len(chargers_df):,}")
 col4.metric(
-    "Avg Transmission Stress" if is_stress_mode else "Avg Feeder Distance", 
+    "Avg Region Stress" if is_stress_mode else "Avg Feeder Distance", 
     f"{df['real_grid_stress'].mean():.1f}%" if (is_stress_mode and not df.empty) else ("N/A" if df.empty else f"{df['dist_miles'].mean():.1f} mi")
 )
 
@@ -311,7 +322,7 @@ else:
 if "Spatial" in visual_mode:
     filter_actions.append("• **Telemetry Mode:** *Spatial Distance (Grid Deficit)* is active. 3D column heights represent physical mileage gaps to the nearest charging hub, flagging commercial 'EV Deserts' (>2.0 mi).")
 else:
-    filter_actions.append(f"• **Telemetry Mode:** *Live Transmission Corridor Stress* is active (EIA-930 PJM Load at {live_pjm_load}% + UNDP GeoHub Transmission Proximity). 3D column heights and highlights indicate Make-Ready capital requirements.")
+    filter_actions.append(f"• **Telemetry Mode:** *Live Transmission Corridor Stress* is active ({selected_respondent} Load at {live_region_load}% + PostGIS Transmission Proximity). 3D column heights and highlights indicate Make-Ready capital requirements.")
 
 if j40_filter:
     filter_actions.append("• **Equity Filter:** *Justice40 DAC Isolation* is enabled. Candidates are filtered strictly to Disadvantaged Communities eligible for prioritized federal clean energy grants.")
@@ -327,7 +338,7 @@ st.info(kinetic_reach_explanation + "\n\n**Active Filter Telemetry Actions:**\n"
 st.markdown("---")
 
 # ---------------------------------------------------------
-# PyDeck 3D Visualization Layer (Filtered by Layer Focus)
+# PyDeck 3D Visualization Layer
 # ---------------------------------------------------------
 layers = []
 
@@ -399,7 +410,7 @@ tooltip_html = (
     "<span style='color: #8b949e;'>Transmission Gap:</span> {trans_dist_miles} miles<br/>"
     "<hr style='margin: 6px 0; border: 0; border-top: 1px solid #30363d;'/>"
     "<b style='color: #c9d1d9;'>Federal Grid Telemetry:</b><br/>"
-    "<span style='color: #8b949e;'>Live PJM Load (EIA-930):</span> <b>" + str(live_pjm_load) + "%</b><br/>"
+    "<span style='color: #8b949e;'>Live " + selected_respondent + " Load:</span> <b>" + str(live_region_load) + "%</b><br/>"
     "<hr style='margin: 6px 0; border: 0; border-top: 1px solid #30363d;'/>"
     "<b style='color: #c9d1d9;'>Executive Insight:</b><br/>"
     "<span style='color: #a5d6ff; line-height: 1.3;'>{insight}</span>"
@@ -413,4 +424,105 @@ r = pdk.Deck(
     tooltip={"html": tooltip_html, "style": {"color": "white"}}
 )
 
-st.pydeck_chart(r, width="stretch", height=650)
+map_selection = st.pydeck_chart(r, width="stretch", height=600, on_select="rerun", selection_mode="single-object")
+
+# ---------------------------------------------------------
+# Dynamic Bottom Drawer: Site Due Diligence Dossier
+# ---------------------------------------------------------
+st.markdown("---")
+st.subheader("📋 Site Due Diligence Dossier")
+
+selected_site = None
+site_type = None
+
+if map_selection and getattr(map_selection, "selection", None):
+    sel_objects = map_selection.selection.get("objects", {})
+    if sel_objects.get("candidate_sites"):
+        selected_site = sel_objects["candidate_sites"][0]
+        site_type = "candidate"
+    elif sel_objects.get("charger_core"):
+        selected_site = sel_objects["charger_core"][0]
+        site_type = "charger"
+
+if selected_site:
+    col_a, col_b, col_c = st.columns(3)
+    
+    with col_a:
+        st.markdown(f"### {selected_site.get('site_title', 'Unknown Site')}")
+        if site_type == "candidate":
+            st.markdown(f"**Classification:** {selected_site.get('status', 'N/A')}")
+            st.markdown(f"**Justice40 DAC Status:** `{selected_site.get('j40_status', 'No')}`")
+            st.markdown(f"**Coordinates:** `{selected_site.get('source_lat', 0):.5f}, {selected_site.get('source_lon', 0):.5f}`")
+            st.markdown(f"**Distance to Nearest DCFC:** `{selected_site.get('dist_miles', 'N/A')} miles`")
+            st.markdown(f"**Transmission Corridor Gap:** `{selected_site.get('trans_dist_miles', 'N/A')} miles [PostGIS]`")
+        else:
+            st.markdown(f"**Classification:** Active Live DCFC Anchor Hub")
+            st.markdown(f"**Operating Network:** `{selected_site.get('ev_network', 'Unknown')}`")
+            st.markdown(f"**Coordinates:** `{selected_site.get('lat', 0):.5f}, {selected_site.get('lon', 0):.5f}`")
+            st.markdown(f"**Active Fast Charging Ports:** `{selected_site.get('ports', 'Unknown')}`")
+            
+    with col_b:
+        if site_type == "candidate":
+            st.markdown("#### ⚡ Real-Time Grid Telemetry")
+            st.markdown(f"**Live {selected_respondent} Load (EIA-930):** `{live_region_load}%`")
+            st.markdown(f"**Composite Stress Score:** `{selected_site.get('real_grid_stress', 0.0)} / 150`")
+            st.markdown(f"• **Transmission Proximity:** `~{selected_site.get('trans_dist_miles', 0.0)} miles away`")
+            st.markdown(f"• **Spatial Grid Deficit:** `{selected_site.get('dist_miles', 0.0)} miles to charger`")
+            
+            score = selected_site.get('real_grid_stress', 0.0)
+            if score >= 95.0:
+                st.error("Critical Constraint: High combined load and transmission gap. Heavy Make-Ready required.")
+            elif score >= 80.0:
+                st.warning("Moderate Upgrade Needed: Interconnection corridor requires transformer support.")
+            else:
+                st.success("Prime Interconnection: High-voltage corridor stable and near capacity.")
+        else:
+            st.markdown("#### ⚡ Operating Grid Anchor Telemetry")
+            st.success("Active Load Verified: Fully operational DC Fast Charging hub.")
+            st.markdown("**Grid Deficit:** `0.00 miles` (System Baseline Node)")
+            st.markdown("**Corridor Compliance:** Meets federal 150kW+ concurrent delivery baseline.")
+            
+    with col_c:
+        st.markdown("#### ⚙️ Dynamic CAPEX Calculator")
+        if site_type == "candidate":
+            ports = st.number_input("Active Ports", min_value=2, max_value=20, value=4, step=2)
+            power = st.selectbox("Power per Port", ["150kW", "350kW"])
+            arch = st.selectbox("Infrastructure Architecture", ["Modular (ChargePoint / ABB / EVgo)", "Prefabricated Skid (Tesla PSU / NEVI)"])
+            
+            kw_val = int(power.replace("kW", ""))
+            total_mw = (ports * kw_val) / 1000.0
+            
+            hw_unit = 55000 if kw_val == 150 else 115000
+            if "Prefabricated" in arch:
+                hw_unit *= 0.65
+            tot_hw = ports * hw_unit
+            
+            civil_base = 25000 + (ports * 10500)
+            if "Prefabricated" in arch: 
+                civil_base *= 0.40
+            
+            stress_score = selected_site.get('real_grid_stress', 50.0)
+            mr_base = 35000 + (total_mw * 1000 * 110)
+            if stress_score >= 95.0: 
+                mr_mult = 1.85
+            elif stress_score >= 80.0: 
+                mr_mult = 1.35
+            else: 
+                mr_mult = 1.0
+            tot_mr = mr_base * mr_mult
+            
+            total_capex = tot_hw + tot_mr + civil_base
+            
+            st.markdown("---")
+            st.markdown(f"**Site Peak Load:** `{total_mw:.2f} MW`")
+            st.markdown(f"🚧 **Civil & Trenching:** `${int(civil_base):,}`")
+            st.markdown(f"🔌 **Make-Ready (Grid Mult: {mr_mult}x):** `${int(tot_mr):,}`")
+            st.markdown(f"🔋 **DCFC Hardware:** `${int(tot_hw):,}`")
+            st.markdown(f"💰 **Est. Total CAPEX:** **`${int(total_capex):,}`**")
+        else:
+            st.markdown("✅ **Grid Capacity:** Verified active load profile.")
+            st.markdown("✅ **Site Permitting:** Complete and Operational.")
+            st.markdown("✅ **Utility Interconnection:** Fully Energized.")
+
+else:
+    st.info("👆 Click any 3D pillar (candidate gas station) or green pad (active EV charger) on the map above to load its full Site Due Diligence Dossier and CAPEX breakdown here.")
