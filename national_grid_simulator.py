@@ -25,7 +25,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("⚡ Nationwide EV Grid Command & Kinetic Reach Simulator (Dual-Mode Engine)")
+st.title("⚡ Nationwide EV Grid Command & Kinetic Reach Simulator (Dynamic Unlimited PostGIS Engine)")
 
 # ---------------------------------------------------------
 # Database Connection (Securely via Streamlit Secrets)
@@ -122,7 +122,7 @@ j40_filter = st.sidebar.checkbox("Isolate Justice40 DAC Sites", value=False, hel
 with st.sidebar.expander("🧠 Methodology & Critical Context", expanded=True):
     st.markdown("""
     **The Visual Metaphor: Pillars vs. Glowing Pads**
-    *   **Neon Green Glowing Pads:** Represent existing active DC Fast-Charging hubs. They are rendered flat because they have a grid deficit of zero—they are geothermal/physical anchors of the current network.
+    *   **Neon Green Glowing Pads:** Represent existing active DC Fast-Charging hubs. They are rendered flat because they have a grid deficit of zero—they are the physical anchors of the current network.
     *   **Extruded 3D Pillars:** Represent existing gas stations, acting as our candidate conversion sites. Why gas stations? They are the ultimate “brownfield” targets for EV infrastructure. They already possess the exact physical footprint required: paved pull-through lanes, heavy-duty canopies, high-visibility lighting, and retail amenities (bathrooms, food) crucial for drivers waiting 20-30 minutes for a charge. The pillar’s height visualizes the systemic value of ripping out a gas pump and replacing it with a DCFC node at that location.
 
     **Why a 2.0 Mile Threshold?**
@@ -135,7 +135,7 @@ with st.sidebar.expander("🧠 Methodology & Critical Context", expanded=True):
     The Justice40 Initiative mandates that 40% of federal clean energy investments flow to Disadvantaged Communities (DACs). Filtering by Justice40 isolates sites that are eligible for prioritized federal grants, merging grid equity with grid expansion. *(Note: DAC status here is modeled deterministically for demonstration).*
 
     **National Grid Oversight Architecture:**
-    *   **Full Lower 48 Coverage:** Encompasses all 14 EIA-930 operating regions.
+    *   **Full Lower 48 Coverage:** Encompasses all 14 EIA-930 operating regions with fully dynamic, un-capped spatial queries.
     *   **Multi-Jurisdictional Seam Analysis:** Automatically identifies overlapping regional footprints across state borders for complete regulatory transparency.
     """)
 
@@ -216,7 +216,7 @@ def fetch_real_time_grid_load(respondent):
 live_region_load = fetch_real_time_grid_load(primary_iso_code)
 
 # ---------------------------------------------------------
-# Direct PostGIS Spatial Queries
+# Direct PostGIS Spatial Queries (Completely Unlimited & Dynamic)
 # ---------------------------------------------------------
 polygon_str = json.dumps(active_polygon.__geo_interface__)
 
@@ -228,7 +228,6 @@ regional_candidates AS (
     SELECT fuel_stations.site_name, fuel_stations.geom AS geom 
     FROM fuel_stations, input_poly
     WHERE ST_Intersects(fuel_stations.geom, input_poly.geom)
-    LIMIT 2000
 )
 SELECT 
     c.site_name,
@@ -264,8 +263,7 @@ SELECT
     ST_X(ev_chargers.geom) AS lon,
     ST_Y(ev_chargers.geom) AS lat
 FROM ev_chargers, input_poly
-WHERE ST_Intersects(ev_chargers.geom, input_poly.geom)
-LIMIT 2000;
+WHERE ST_Intersects(ev_chargers.geom, input_poly.geom);
 """
 
 transmission_query = """
@@ -276,11 +274,10 @@ SELECT
     COALESCE("VOLTAGE", 0) AS voltage,
     ST_AsGeoJSON(transmission_lines.geometry) AS geojson
 FROM transmission_lines, input_poly
-WHERE ST_Intersects(transmission_lines.geometry, input_poly.geom)
-LIMIT 1200;
+WHERE ST_Intersects(transmission_lines.geometry, input_poly.geom);
 """
 
-with st.spinner("Querying national PostGIS spatial engine and transmission layers..."):
+with st.spinner("Querying dynamic unlimited regional PostGIS spatial engine..."):
     try:
         conn = get_db_connection()
         df = pd.read_sql(candidates_query, conn, params=(polygon_str,))
@@ -452,7 +449,7 @@ if show_transmission and not trans_df.empty:
         width_scale=2,
         width_min_pixels=1.5,
         get_width=3,
-        pickable=True,
+        pickable=False,
     )
     layers.append(layer_transmission)
 
