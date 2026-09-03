@@ -148,7 +148,7 @@ if not active_polygon:
     st.stop()
 
 # ---------------------------------------------------------
-# Direct PostGIS Spatial Engine (Ambiguity-Free Query with Rollback)
+# Direct PostGIS Spatial Engine (Fixed 'geometry' column reference)
 # ---------------------------------------------------------
 polygon_str = json.dumps(active_polygon.__geo_interface__)
 
@@ -179,9 +179,9 @@ CROSS JOIN LATERAL (
     LIMIT 1
 ) e
 CROSS JOIN LATERAL (
-    SELECT t_sub.geom AS geom 
+    SELECT t_sub.geometry AS geom 
     FROM transmission_lines t_sub 
-    ORDER BY c.geom <-> t_sub.geom 
+    ORDER BY c.geom <-> t_sub.geometry 
     LIMIT 1
 ) t;
 """
