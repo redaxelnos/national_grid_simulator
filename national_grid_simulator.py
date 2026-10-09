@@ -55,18 +55,6 @@ def get_carto_basemap_url(style="voyager"):
         )
     return f"https://basemaps.cartocdn.com/rastertiles/{style}/{{z}}/{{x}}/{{y}}.png"
 
-# Quick, secure UI control for map base style
-basemap_style = st.sidebar.selectbox(
-    "Basemap Style",
-    ["Voyager", "Positron", "Dark Matter"],
-    index=0,
-)
-CARTO_BASEMAP_URL = get_carto_basemap_url({
-    "Voyager": "voyager",
-    "Positron": "positron",
-    "Dark Matter": "darkmatter",
-}[basemap_style])
-
 # ---------------------------------------------------------
 # Comprehensive National Balancing Authority Footprints (14 Regions)
 # ---------------------------------------------------------
@@ -142,7 +130,15 @@ layer_focus = st.sidebar.radio(
 )
 
 st.sidebar.markdown("---")
-st.sidebar.header("🗺️ GIS Overlays")
+st.sidebar.header("🗺️ Map & GIS Overlays")
+# Basemap style selector - moved here to work properly with session state
+basemap_style = st.sidebar.selectbox(
+    "Basemap Style",
+    ["Voyager", "Positron", "Dark Matter"],
+    index=0,
+    key="basemap_style_selector"
+)
+
 show_transmission = st.sidebar.checkbox("Render High-Voltage Transmission Lines", value=True, help="Query and render real transmission corridors from PostGIS within the active boundary.")
 
 st.sidebar.markdown("---")
@@ -184,8 +180,12 @@ camera_pitch = st.sidebar.slider("Camera Pitch", min_value=30, max_value=60, val
 camera_bearing = st.sidebar.slider("Camera Rotation", min_value=-180, max_value=180, value=-22, step=2)
 
 # ---------------------------------------------------------
-# Interactive Folium Map with CARTO Basemap
+# Interactive Folium Map with CARTO Basemap (Dynamic)
 # ---------------------------------------------------------
+# Map the basemap style selector to the URL style
+style_map = {"Voyager": "voyager", "Positron": "positron", "Dark Matter": "darkmatter"}
+CARTO_BASEMAP_URL = get_carto_basemap_url(style_map[basemap_style])
+
 m = folium.Map(
     location=map_center,
     zoom_start=map_zoom,
@@ -479,6 +479,8 @@ if show_arcs and layer_focus != "Existing EV Charging Hubs Only":
     filter_actions.append("• **Kinetic Reach Arcs:** Active. Arcs project vector connections from unserved candidate nodes to their nearest active charging anchors.")
 else:
     filter_actions.append("• **Kinetic Reach Arcs:** Hidden or disabled for the active layer view.")
+
+filter_actions.append(f"• **Basemap:** {basemap_style} (powered by CARTO)")
 
 st.info("**Active Filter Telemetry Actions:**\n" + "\n".join(filter_actions))
 st.markdown("---")
