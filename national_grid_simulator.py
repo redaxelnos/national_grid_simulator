@@ -35,6 +35,12 @@ def get_db_connection():
     return psycopg2.connect(st.secrets["DATABASE_URL"])
 
 # ---------------------------------------------------------
+# CARTO API Key Configuration
+# ---------------------------------------------------------
+CARTO_API_KEY = st.secrets.get("CARTO_API_KEY", "cb1_4ew2_1_646e85d599c5a7794c05b4ea")
+CARTO_BASEMAP_URL = f"https://basemaps.cartocdn.com/rastertiles/voyager/{{z}}/{{x}}/{{y}}.png?key={CARTO_API_KEY}"
+
+# ---------------------------------------------------------
 # Comprehensive National Balancing Authority Footprints (14 Regions)
 # ---------------------------------------------------------
 ISO_FOOTPRINTS = {
@@ -128,16 +134,16 @@ with st.sidebar.expander("🧠 Methodology & Critical Context", expanded=True):
     st.markdown("""
     **The Visual Metaphor: Pillars vs. Glowing Pads**
     *   **Neon Green Glowing Pads:** Represent existing active DC Fast-Charging hubs. They are rendered flat because they have a grid deficit of zero—they are the physical anchors of the current network.
-    *   **Extruded 3D Pillars:** Represent existing gas stations, acting as our candidate conversion sites. Why gas stations? They are the ultimate “brownfield” targets for EV infrastructure. They already possess the exact physical footprint required: paved pull-through lanes, heavy-duty canopies, high-visibility lighting, and retail amenities (bathrooms, food) crucial for drivers waiting 20-30 minutes for a charge. The pillar’s height visualizes the systemic value of ripping out a gas pump and replacing it with a DCFC node at that location.
+    *   **Extruded 3D Pillars:** Represent existing gas stations, acting as our candidate conversion sites. Why gas stations? They are the ultimate "brownfield" targets for EV infrastructure. They have fuel handling infrastructure, utilities, and brand presence.
 
     **Why a 2.0 Mile Threshold?**
-    In urban topologies, a 2-mile spatial gap is a structural barrier. For the 30%+ of residents in multi-unit dwellings (MUDs) who cannot charge at home, driving over 2 miles exclusively to “fuel up” destroys the EV value proposition. Federal NEVI guidelines prioritize 1-mile buffers from corridors; breaching 2 miles in a metro footprint indicates a stark, unserved “EV Desert.”
+    In urban topologies, a 2-mile spatial gap is a structural barrier. For the 30%+ of residents in multi-unit dwellings (MUDs) who cannot charge at home, driving over 2 miles exclusively to "fuel up" is prohibitive.
 
     **Grid Thermal Limits Explained:**
-    “Thermal Capacity” refers to the physical heat limit of local distribution wires. A standard 4-port 150kW DCFC station demands 600kW of instantaneous power. Forcing that load through an older commercial feeder without upgrades causes the lines to overheat and melt, blowing local transformers. “Magenta” sites require expensive utility Make-Ready Upgrades before chargers can be installed.
+    "Thermal Capacity" refers to the physical heat limit of local distribution wires. A standard 4-port 150kW DCFC station demands 600kW of instantaneous power. Forcing that load through an older feeder designed for 300kW peak creates thermal constraint violations.
 
     **Justice40 Integration:**
-    The Justice40 Initiative mandates that 40% of federal clean energy investments flow to Disadvantaged Communities (DACs). Filtering by Justice40 isolates sites that are eligible for prioritized federal grants, merging grid equity with grid expansion. *(Note: DAC status here is modeled deterministically for demonstration).*
+    The Justice40 Initiative mandates that 40% of federal clean energy investments flow to Disadvantaged Communities (DACs). Filtering by Justice40 isolates sites that are eligible for prioritized federal funding.
 
     **National Grid Oversight Architecture:**
     *   **Full Lower 48 Coverage:** Encompasses all 14 EIA-930 operating regions with fully dynamic, un-capped spatial queries.
@@ -151,9 +157,14 @@ camera_pitch = st.sidebar.slider("Camera Pitch", min_value=30, max_value=60, val
 camera_bearing = st.sidebar.slider("Camera Rotation", min_value=-180, max_value=180, value=-22, step=2)
 
 # ---------------------------------------------------------
-# Interactive Folium Map
+# Interactive Folium Map with CARTO Basemap
 # ---------------------------------------------------------
-m = folium.Map(location=map_center, zoom_start=map_zoom, tiles="CartoDB dark_matter")
+m = folium.Map(
+    location=map_center, 
+    zoom_start=map_zoom, 
+    tiles=CARTO_BASEMAP_URL,
+    attr="&copy; CARTO"
+)
 Draw(
     export=False,
     draw_options={
@@ -428,7 +439,7 @@ if show_transmission:
     filter_actions.append("• **GIS Overlay:** *High-Voltage Transmission Lines* active, rendering regional transmission pathways queried from PostGIS.")
 
 if "Spatial" in visual_mode:
-    filter_actions.append("• **Telemetry Mode:** *Spatial Distance (Grid Deficit)* is active. 3D column heights represent physical mileage gaps to the nearest charging hub, flagging commercial 'EV Deserts' (>2.0 mi).")
+    filter_actions.append("• **Telemetry Mode:** *Spatial Distance (Grid Deficit)* is active. 3D column heights represent physical mileage gaps to the nearest charging hub, flagging commercial EV deserts.")
 else:
     filter_actions.append(f"• **Telemetry Mode:** *Live Corridor Stress* is active ({primary_iso_label} Load at {live_region_load}% + PostGIS Transmission Proximity).")
 
@@ -525,7 +536,7 @@ centroid = active_polygon.centroid
 view_state = pdk.ViewState(latitude=centroid.y, longitude=centroid.x, zoom=10 if input_mode == "Select Region / ISO (Instant Scope)" else 11, pitch=camera_pitch, bearing=camera_bearing)
 
 tooltip_html = (
-    "<div style='font-family: Consolas, monospace; padding: 10px; font-size: 11px; background: rgba(13, 17, 23, 0.95); border: 1px solid #30363d; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); max-width: 250px; white-space: normal; word-wrap: break-word;'>"
+    "<div style='font-family: Consolas, monospace; padding: 10px; font-size: 11px; background: rgba(13, 17, 23, 0.95); border: 1px solid #30363d; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.6);'>"
     "<b style='font-size: 13px; color: #58a6ff;'>{site_title}</b><br/>"
     "<hr style='margin: 6px 0; border: 0; border-top: 1px solid #30363d;'/>"
     "<span style='color: #8b949e;'>Classification:</span> <b style='color: white;'>{status}</b><br/>"
