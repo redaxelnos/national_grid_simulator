@@ -166,39 +166,44 @@ style_map = {
     "Dark Matter": "darkmatter",
 }
 
-carto_key = st.secrets.get("CARTO_API_KEY", "cb1_4ew2_1_646e85d599c5a7794c05b4ea")
-CARTO_BASEMAP_URL = (
-    f"https://basemaps.cartocdn.com/rastertiles/{style_map[basemap_style]}/{{z}}/{{x}}/{{y}}.png"
-    f"?key={carto_key}"
-)
+@st.cache_resource(show_spinner=False)
+def create_folium_map(style_key, center, zoom):
+    carto_key = st.secrets.get("CARTO_API_KEY", "cb1_4ew2_1_646e85d599c5a7794c05b4ea")
+    carto_url = (
+        f"https://basemaps.cartocdn.com/rastertiles/{style_map[style_key]}/{{z}}/{{x}}/{{y}}.png"
+        f"?key={carto_key}"
+    )
 
-m = folium.Map(
-    location=map_center,
-    zoom_start=map_zoom,
-    tiles=CARTO_BASEMAP_URL,
-    attr="&copy; CARTO"
-)
-Draw(
-    export=False,
-    draw_options={
-        'polyline': False,
-        'circle': False,
-        'marker': False,
-        'circlemarker': False,
-        'polygon': True,
-        'rectangle': True
-    }
-).add_to(m)
+    m = folium.Map(
+        location=center,
+        zoom_start=zoom,
+        tiles=carto_url,
+        attr="&copy; CARTO"
+    )
+    Draw(
+        export=False,
+        draw_options={
+            'polyline': False,
+            'circle': False,
+            'marker': False,
+            'circlemarker': False,
+            'polygon': True,
+            'rectangle': True
+        }
+    ).add_to(m)
+    return m
+
+m = create_folium_map(basemap_style, map_center, map_zoom)
 
 map_container = st.container()
 with map_container:
     if input_mode == "Draw Custom Boundary (Manual Seam)":
-        draw_output = st_folium(m, width="100%", height=400, key="interactive_map")
+        draw_output = st_folium(m, width="100%", height=400, key=f"interactive_map_{basemap_style}")
         if draw_output and draw_output.get("last_active_drawing"):
             geom_dict = draw_output["last_active_drawing"]["geometry"]
             active_polygon = shape(geom_dict)
     else:
-        st_folium(m, width="100%", height=400, key="static_iso_map")
+        st_folium(m, width="100%", height=400, key=f"static_iso_map_{basemap_style}")
 
 if not active_polygon:
     st.info("👆 Select a regional ISO from the sidebar or draw a custom boundary on the map above to query PostGIS.")
@@ -210,7 +215,6 @@ if not active_polygon:
 if input_mode == "Select Region / ISO (Instant Scope)" and selected_iso_info:
     region_governing_isos = [(selected_iso_info["code"], selected_iso_info["name"])]
 else:
-    # For custom drawn polygons, check centroid coordinates
     centroid = active_polygon.centroid
     region_governing_isos = get_iso_for_point(centroid.x, centroid.y)
 
@@ -238,10 +242,10 @@ def fetch_real_time_grid_load(respondent):
         records = data.get("response", {}).get("data", [])
         if not records:
             return 85.0
-            
+
         actual_demand = next((r['value'] for r in records if r['type'] == 'D'), None)
         forecast_demand = next((r['value'] for r in records if r['type'] == 'DF'), None)
-        
+
         if actual_demand and forecast_demand:
             return round((actual_demand / forecast_demand) * 100, 1)
         return 85.0
@@ -317,7 +321,7 @@ with st.spinner("Querying dynamic unlimited regional PostGIS spatial engine...")
         conn = get_db_connection()
         df = pd.read_sql(candidates_query, conn, params=(polygon_str,))
         chargers_df = pd.read_sql(chargers_query, conn, params=(polygon_str,))
-        
+
         if not df.empty:
             target_chargers = df[['nearest_charger', 'target_lon', 'target_lat']].drop_duplicates(subset=['target_lon', 'target_lat']).copy()
             target_chargers['station_name'] = target_chargers['nearest_charger']
@@ -596,7 +600,6 @@ if map_selection and getattr(map_selection, "selection", None):
         site_type = "charger"
 
 if selected_site:
-    # Resolve precise governing ISO for this exact clicked site using its coordinates
     site_lon = selected_site.get('source_lon', selected_site.get('lon', 0))
     site_lat = selected_site.get('source_lat', selected_site.get('lat', 0))
     site_isos = get_iso_for_point(site_lon, site_lat)
@@ -604,7 +607,7 @@ if selected_site:
     site_primary_code = site_isos[0][0]
 
     col_a, col_b, col_c = st.columns(3)
-    
+
     with col_a:
         st.markdown(f"### {selected_site.get('site_title', 'Unknown Site')}")
         if site_type == "candidate":
@@ -618,7 +621,7 @@ if selected_site:
             st.markdown(f"**Operating Network:** `{selected_site.get('ev_network', 'Unknown')}`")
             st.markdown(f"**Coordinates:** `{site_lat:.5f}, {site_lon:.5f}`")
             st.markdown(f"**Active Fast Charging Ports:** `{selected_site.get('ports', 'Unknown')}`")
-            
+
     with col_b:
         if site_type == "candidate":
             st.markdown("#### ⚡ Local Grid Oversight")
@@ -626,7 +629,7 @@ if selected_site:
             st.markdown(f"**Primary EIA-930 Load ({site_primary_code}):** `{live_region_load}%`")
             st.markdown(f"**Composite Stress Score:** `{selected_site.get('real_grid_stress', 0.0)} / 150`")
             st.markdown(f"• **Transmission Proximity:** `~{selected_site.get('trans_dist_miles', 0.0)} miles away`")
-            
+
             score = selected_site.get('real_grid_stress', 0.0)
             if score >= 95.0:
                 st.error("Critical Constraint: High combined load and transmission gap. Heavy Make-Ready required.")
@@ -639,38 +642,38 @@ if selected_site:
             st.success("Active Load Verified: Fully operational DC Fast Charging hub.")
             st.markdown(f"**Governing Jurisdiction:** `{site_iso_str}`")
             st.markdown("**Grid Deficit:** `0.00 miles` (System Baseline Node)")
-            
+
     with col_c:
         st.markdown("#### ⚙️ Dynamic CAPEX Calculator")
         if site_type == "candidate":
             ports = st.number_input("Active Ports", min_value=2, max_value=20, value=4, step=2)
             power = st.selectbox("Power per Port", ["150kW", "350kW"])
             arch = st.selectbox("Infrastructure Architecture", ["Modular (ChargePoint / ABB / EVgo)", "Prefabricated Skid (Tesla PSU / NEVI)"])
-            
+
             kw_val = int(power.replace("kW", ""))
             total_mw = (ports * kw_val) / 1000.0
-            
+
             hw_unit = 55000 if kw_val == 150 else 115000
             if "Prefabricated" in arch:
                 hw_unit *= 0.65
             tot_hw = ports * hw_unit
-            
+
             civil_base = 25000 + (ports * 10500)
-            if "Prefabricated" in arch: 
+            if "Prefabricated" in arch:
                 civil_base *= 0.40
-            
+
             stress_score = selected_site.get('real_grid_stress', 50.0)
             mr_base = 35000 + (total_mw * 1000 * 110)
-            if score >= 95.0: 
+            if stress_score >= 95.0:
                 mr_mult = 1.85
-            elif score >= 80.0: 
+            elif stress_score >= 80.0:
                 mr_mult = 1.35
-            else: 
+            else:
                 mr_mult = 1.0
             tot_mr = mr_base * mr_mult
-            
+
             total_capex = tot_hw + tot_mr + civil_base
-            
+
             st.markdown("---")
             st.markdown(f"**Site Peak Load:** `{total_mw:.2f} MW`")
             st.markdown(f"🚧 **Civil & Trenching:** `${int(civil_base):,}`")
