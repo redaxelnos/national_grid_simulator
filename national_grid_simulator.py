@@ -35,10 +35,37 @@ def get_db_connection():
     return psycopg2.connect(st.secrets["DATABASE_URL"])
 
 # ---------------------------------------------------------
-# CARTO API Key Configuration
+# CARTO Basemap Configuration
 # ---------------------------------------------------------
-CARTO_API_KEY = st.secrets.get("CARTO_API_KEY", "cb1_4ew2_1_646e85d599c5a7794c05b4ea")
-CARTO_BASEMAP_URL = f"https://basemaps.cartocdn.com/rastertiles/voyager/{{z}}/{{x}}/{{y}}.png?key={CARTO_API_KEY}"
+def get_carto_basemap_url(style="voyager"):
+    """Return a CARTO basemap URL with API key support and a safe fallback."""
+    carto_key = st.secrets.get("CARTO_API_KEY") if hasattr(st, "secrets") else None
+    if not carto_key:
+        carto_key = "cb1_4ew2_1_646e85d599c5a7794c05b4ea"
+
+    style = style.lower().replace(" ", "")
+    valid_styles = {"voyager", "positron", "darkmatter"}
+    if style not in valid_styles:
+        style = "voyager"
+
+    if carto_key:
+        return (
+            f"https://basemaps.cartocdn.com/rastertiles/{style}/{{z}}/{{x}}/{{y}}.png"
+            f"?key={carto_key}"
+        )
+    return f"https://basemaps.cartocdn.com/rastertiles/{style}/{{z}}/{{x}}/{{y}}.png"
+
+# Quick, secure UI control for map base style
+basemap_style = st.sidebar.selectbox(
+    "Basemap Style",
+    ["Voyager", "Positron", "Dark Matter"],
+    index=0,
+)
+CARTO_BASEMAP_URL = get_carto_basemap_url({
+    "Voyager": "voyager",
+    "Positron": "positron",
+    "Dark Matter": "darkmatter",
+}[basemap_style])
 
 # ---------------------------------------------------------
 # Comprehensive National Balancing Authority Footprints (14 Regions)
@@ -160,8 +187,8 @@ camera_bearing = st.sidebar.slider("Camera Rotation", min_value=-180, max_value=
 # Interactive Folium Map with CARTO Basemap
 # ---------------------------------------------------------
 m = folium.Map(
-    location=map_center, 
-    zoom_start=map_zoom, 
+    location=map_center,
+    zoom_start=map_zoom,
     tiles=CARTO_BASEMAP_URL,
     attr="&copy; CARTO"
 )
