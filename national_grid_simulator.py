@@ -35,27 +35,6 @@ def get_db_connection():
     return psycopg2.connect(st.secrets["DATABASE_URL"])
 
 # ---------------------------------------------------------
-# CARTO Basemap Configuration
-# ---------------------------------------------------------
-def get_carto_basemap_url(style="voyager"):
-    """Return a CARTO basemap URL with API key support and a safe fallback."""
-    carto_key = st.secrets.get("CARTO_API_KEY") if hasattr(st, "secrets") else None
-    if not carto_key:
-        carto_key = "cb1_4ew2_1_646e85d599c5a7794c05b4ea"
-
-    style = style.lower().replace(" ", "")
-    valid_styles = {"voyager", "positron", "darkmatter"}
-    if style not in valid_styles:
-        style = "voyager"
-
-    if carto_key:
-        return (
-            f"https://basemaps.cartocdn.com/rastertiles/{style}/{{z}}/{{x}}/{{y}}.png"
-            f"?key={carto_key}"
-        )
-    return f"https://basemaps.cartocdn.com/rastertiles/{style}/{{z}}/{{x}}/{{y}}.png"
-
-# ---------------------------------------------------------
 # Comprehensive National Balancing Authority Footprints (14 Regions)
 # ---------------------------------------------------------
 ISO_FOOTPRINTS = {
@@ -130,16 +109,15 @@ layer_focus = st.sidebar.radio(
 )
 
 st.sidebar.markdown("---")
-st.sidebar.header("🗺️ Map & GIS Overlays")
-# Basemap style selector - moved here to work properly with session state
+st.sidebar.header("🗺️ GIS Overlays")
+show_transmission = st.sidebar.checkbox("Render High-Voltage Transmission Lines", value=True, help="Query and render real transmission corridors from PostGIS within the active boundary.")
+
 basemap_style = st.sidebar.selectbox(
     "Basemap Style",
     ["Voyager", "Positron", "Dark Matter"],
     index=0,
     key="basemap_style_selector"
 )
-
-show_transmission = st.sidebar.checkbox("Render High-Voltage Transmission Lines", value=True, help="Query and render real transmission corridors from PostGIS within the active boundary.")
 
 st.sidebar.markdown("---")
 st.sidebar.header("🕹️ Visual Engine Modes")
@@ -180,11 +158,19 @@ camera_pitch = st.sidebar.slider("Camera Pitch", min_value=30, max_value=60, val
 camera_bearing = st.sidebar.slider("Camera Rotation", min_value=-180, max_value=180, value=-22, step=2)
 
 # ---------------------------------------------------------
-# Interactive Folium Map with CARTO Basemap (Dynamic)
+# Interactive Folium Map
 # ---------------------------------------------------------
-# Map the basemap style selector to the URL style
-style_map = {"Voyager": "voyager", "Positron": "positron", "Dark Matter": "darkmatter"}
-CARTO_BASEMAP_URL = get_carto_basemap_url(style_map[basemap_style])
+style_map = {
+    "Voyager": "voyager",
+    "Positron": "positron",
+    "Dark Matter": "darkmatter",
+}
+
+carto_key = st.secrets.get("CARTO_API_KEY", "cb1_4ew2_1_646e85d599c5a7794c05b4ea")
+CARTO_BASEMAP_URL = (
+    f"https://basemaps.cartocdn.com/rastertiles/{style_map[basemap_style]}/{{z}}/{{x}}/{{y}}.png"
+    f"?key={carto_key}"
+)
 
 m = folium.Map(
     location=map_center,
